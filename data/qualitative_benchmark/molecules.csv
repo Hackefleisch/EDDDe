@@ -1,12 +1,12 @@
 name;description;smiles
-bsc;Basic;CC1=CC=C(CC2=CC=C(C)C=C2)C=C1
-blc;Longer center;CC1=CC=C(CCC2=CC=C(C)C=C2)C=C1
-blm;Longer moiety;CCC1=CC=C(CC2=CC=C(C)C=C2)C=C1
-oxc;Oxygen center;CC1=CC=C(COC2=CC=C(C)C=C2)C=C1
-nic;Nitrogen center;CC1=CC=C(CNC2=CC=C(C)C=C2)C=C1
-nim;Nitrogen moiety;CC1=CC=C(CC2=CC=C(CN)C=C2)C=C1
-oxm;Oxygen moiety;CC1=CC=C(CC2=CC=C(CO)C=C2)C=C1
-flm;Fluorine moiety;CC1=CC=C(CC2=CC=C(CF)C=C2)C=C1
-clm;Chlorine moiety;CC1=CC=C(CC2=CC=C(CCl)C=C2)C=C1
-brm;Bromine moiety;CC1=CC=C(CC2=CC=C(CBr)C=C2)C=C1
-iom;Iodine moiety;CC1=CC=C(CC2=CC=C(CI)C=C2)C=C1
+bsc;Basic;CC1=CC=C(C=C1)C(=C)CC1=CC=CC=C1
+blc;Longer center;CCC1=CC=C(C=C1)C(=C)CCC1=CC=CC=C1
+blm;Longer moiety;CCC1=CC=C(C=C1)C(=C)CC1=CC=CC=C1
+oxc;Oxygen center;CC1=CC=C(C=C1)C(=O)CC1=CC=CC=C1
+nic;Nitrogen center;CC1=CC=C(C=C1)C(=N)CC1=CC=CC=C1
+nim;Nitrogen moiety;NCC1=CC=C(C=C1)C(=C)CC1=CC=CC=C1
+oxm;Oxygen moiety;OCC1=CC=C(C=C1)C(=C)CC1=CC=CC=C1
+flm;Fluorine moiety;FCC1=CC=C(C=C1)C(=C)CC1=CC=CC=C1
+clm;Chlorine moiety;ClCC1=CC=C(C=C1)C(=C)CC1=CC=CC=C1
+brm;Bromine moiety;BrCC1=CC=C(C=C1)C(=C)CC1=CC=CC=C1
+iom;Iodine moiety;ICC1=CC=C(C=C1)C(=C)CC1=CC=CC=C1

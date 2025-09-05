@@ -1,2 +1,2 @@
-# EDDe
-Electron Density based descriptors for molecular learning and property prediction
+# EDDDe
+Electron Density Derived Descriptors for molecular learning and property prediction

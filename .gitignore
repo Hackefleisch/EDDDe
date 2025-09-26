@@ -1,6 +1,7 @@
 # custom 
 data/SMRT
 data/WellQrate
+data/qsar
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

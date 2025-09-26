@@ -19,6 +19,7 @@ dependencies = [
     "ipykernel>=6.30.1",
     "matplotlib>=3.10.6",
     "elektronn @ file:///home/jderiz/EDDDe/ElektroNN",
+    "ovito>=3.14.0",
 ]
 
 [project.optional-dependencies]

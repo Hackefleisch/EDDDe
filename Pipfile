@@ -11,6 +11,7 @@ e3nn = "*"
 periodictable = "*"
 torch-geometric = "*"
 rdkit = "*"
+cmake = "*"
 
 [dev-packages]
 ipykernel = "*"

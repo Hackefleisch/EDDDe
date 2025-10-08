@@ -62,13 +62,13 @@ class InferenceEngine:
         prefetch_factor: int = 2,
         show_progress: bool = True,
     ):
-        self.predictor = predictor
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.pin_memory = pin_memory
-        self.prefetch_factor = prefetch_factor
-        self.show_progress = show_progress
-        self.device = predictor.device
+        self.predictor: EnsemblePredictor = predictor
+        self.batch_size: int = batch_size
+        self.num_workers: int = num_workers
+        self.pin_memory: bool = pin_memory
+        self.prefetch_factor: int = prefetch_factor
+        self.show_progress: bool = show_progress
+        self.device: torch.device = predictor.device
 
     @torch.no_grad()
     def predict_dataset(

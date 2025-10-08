@@ -193,13 +193,13 @@ class ModelManager:
 
     def get_model_info(self) -> Dict:
         """
-        Get information about loaded models.
+            Get information about loaded models.
 
-        Returns
-        -------
-        Dict
-            Dictionary containing model information including number of models,
-            device, and total parameters
+            Returns
+            -------
+            Dict
+                Dictionary containing model information including number of models,
+                device, and total parameters
         """
         if not self.models:
             return {
@@ -221,28 +221,27 @@ class ModelManager:
 
 class EnsemblePredictor:
     """
-    Handles ensemble predictions with uncertainty quantification.
+        Handles ensemble predictions with uncertainty quantification.
+        This class wraps multiple models and provides ensemble prediction
+        with mean and standard deviation across model outputs.
 
-    This class wraps multiple models and provides ensemble prediction
-    with mean and standard deviation across model outputs.
+        Parameters
+        ----------
+        models : List[nn.Module]
+            List of model instances for ensemble prediction
+        device : str or torch.device, optional
+            Device for inference (default: 'cuda')
+        aggregation : str, optional
+            Aggregation method ('mean', 'median') (default: 'mean')
 
-    Parameters
-    ----------
-    models : List[nn.Module]
-        List of model instances for ensemble prediction
-    device : str or torch.device, optional
-        Device for inference (default: 'cuda')
-    aggregation : str, optional
-        Aggregation method ('mean', 'median') (default: 'mean')
-
-    Attributes
-    ----------
-    models : List[nn.Module]
-        Model instances
-    device : torch.device
-        Inference device
-    num_models : int
-        Number of models in ensemble
+        Attributes
+        ----------
+        models : List[nn.Module]
+            Model instances
+        device : torch.device
+            Inference device
+        num_models : int
+            Number of models in ensemble
     """
 
     def __init__(

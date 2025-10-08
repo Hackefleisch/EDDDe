@@ -56,3 +56,8 @@ members = ["ElektroNN"]
 
 [tool.uv.sources]
 elektronn = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.0.0",
+]

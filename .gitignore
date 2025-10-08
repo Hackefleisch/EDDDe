@@ -3,6 +3,7 @@ data/SMRT
 data/WellQrate
 data/qsar
 outputs/
+mlruns/
 *.npy
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -10,8 +10,6 @@ import sys
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from . import convert, predict
-
 
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
 def main(cfg: DictConfig):
@@ -26,15 +24,13 @@ def main(cfg: DictConfig):
     if task == "convert":
         # Run conversion task
         print("Running conversion task...")
-        from .convert import main as convert_main
-        # The convert function expects cfg to be passed via Hydra decorator,
-        # but we're calling it programmatically, so we need to handle it differently
-        convert_main.func(cfg)
+        from .convert import run_convert as convert_main
+        convert_main(cfg)
     elif task == "predict":
         # Run prediction task
         print("Running prediction task...")
-        from .predict import main as predict_main
-        predict_main.func(cfg)
+        from .predict import run_predict as predict_main
+        predict_main(cfg)
     else:
         print(f"Error: Unknown task '{task}'")
         print("Valid tasks: 'convert', 'predict'")

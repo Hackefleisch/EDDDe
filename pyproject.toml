@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eddde"
+version = "0.1.0"
+description = "EDDDe project"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "torch",
+    "scipy",
+    "e3nn",
+    "periodictable",
+    "torch-geometric",
+    "rdkit",
+    "ipykernel>=6.30.1",
+    "matplotlib>=3.10.6",
+    "elektronn",
+    "pychimera>=0.2.7",
+    "nglview>=3.1.4",
+    "hydra-core",
+    "tqdm",
+    "mlflow>=3.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ipykernel",
+    "matplotlib",
+]
+
+[project.scripts]
+eddde = "eddde.eddde:main"
+eddde-convert = "eddde.convert:main"
+eddde-predict = "eddde.predict:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["eddde*", "conf*"]
+exclude = ["tests*", "docs*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.txt", "*.md", "*.yml", "*.yaml"]
+"conf" = ["*.yaml", "**/*.yaml"]
+
+[tool.uv.workspace]
+members = ["ElektroNN"]
+
+[tool.uv.sources]
+elektronn = { workspace = true }

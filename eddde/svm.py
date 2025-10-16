@@ -1,5 +1,5 @@
 from sklearn.svm import SVC
-from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_score
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_score, train_test_split
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     roc_auc_score, average_precision_score, classification_report,
@@ -71,7 +71,7 @@ def comprehensive_cross_validation(X, y, model, cv_folds=5):
         
         # Calculate metrics
         metrics['accuracy'].append(accuracy_score(y_test, y_pred))
-        metrics['precision'].append(precision_score(y_test, y_pred))
+        metrics['precision'].append(precision_score(y_test, y_pred, zero_division=0))
         metrics['recall'].append(recall_score(y_test, y_pred))
         metrics['f1'].append(f1_score(y_test, y_pred))
         metrics['roc_auc'].append(roc_auc_score(y_test, y_proba))
@@ -222,41 +222,45 @@ def save_model_and_scaler(model, scaler, best_params, results, save_dir):
 
 
 def main():
-    """Main function to run the complete SVM analysis."""
-    print("Starting SVM Analysis with Cross-Validation and Grid Search")
-    print("="*60)
-    
     # Load and preprocess data
     X, y = load_and_preprocess_data()
+
+    # remove test data 
+    X, X_test, y, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
     
+    print("Train data:", len(X))
+    print("Train positives:", sum(y))
+    print("Test data:", len(X_test))
+    print("Test positives:", sum(y_test))
     # Perform grid search optimization
     best_model, best_params, scaler = grid_search_optimization(X, y)
     
     # Evaluate best model
-    results, fold_metrics = evaluate_best_model(X, y, best_model, scaler)
+    results, fold_metrics = evaluate_best_model(X_test, y_test, best_model, scaler)
     
     # Final evaluation on full dataset for detailed metrics
     print("\n" + "="*60)
     print("FINAL MODEL EVALUATION")
     print("="*60)
     
-    X_scaled = scaler.transform(X)
+    X_scaled = scaler.transform(X_test)
     y_pred = best_model.predict(X_scaled)
     y_proba = best_model.predict_proba(X_scaled)[:, 1]
     
     print("Classification Report:")
-    print(classification_report(y, y_pred))
+    print(classification_report(y_test, y_pred))
     
     print("\nConfusion Matrix:")
-    print(confusion_matrix(y, y_pred))
+    print(confusion_matrix(y_test, y_pred))
     
-    print(f"\nFinal ROC-AUC Score: {roc_auc_score(y, y_proba):.4f}")
-    print(f"Final Average Precision Score: {average_precision_score(y, y_proba):.4f}")
+    print(f"\nFinal ROC-AUC Score: {roc_auc_score(y_test, y_proba):.4f}")
+    print(f"Final Average Precision Score: {average_precision_score(y_test, y_proba):.4f}")
     
     # Plot ROC curve
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     roc_save_path = f'/home/jderiz/EDDDe/data/qsar/embeddings/AID435034/roc_curve_{timestamp}.png'
-    fpr, tpr, roc_auc = plot_roc_curve(y, y_proba, save_path=roc_save_path)
+    fpr, tpr, roc_auc = plot_roc_curve(y_test, y_proba, save_path=roc_save_path)
     
     # Save model and results to parent folder
     save_dir = '/home/jderiz/EDDDe/data/qsar/embeddings/AID435034'

@@ -1,0 +1,10 @@
+# SMRT Dataset - SDF file (pre-computed 3D conformers)
+
+csv_file: null
+smiles_col: null
+id_col: null
+sdf_file: ${paths.data_root}/SMRT/SMRT_dataset.sdf
+cache_conformers: false
+conformer_seed: 42069
+filter_bad_atoms: true
+verbose: false

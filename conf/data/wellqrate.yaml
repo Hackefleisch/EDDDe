@@ -1,0 +1,11 @@
+# WellQrate Dataset - CSV with SMILES (generates 3D conformers)
+
+csv_file: ${paths.data_root}/qsar/AID435034_actives.csv
+smiles_col: SMILES
+id_col: CID
+sdf_file: null
+cache_conformers: false
+conformer_seed: 42069
+filter_bad_atoms: true
+verbose: false
+

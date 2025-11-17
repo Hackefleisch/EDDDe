@@ -1,0 +1,59 @@
+# EDDDe Main Configuration
+# Electron Density Derived Descriptors
+defaults:
+  - _self_
+  - data: wellqrate
+
+# Task selection (for main eddde command)
+task: predict  # Options: predict, convert
+
+# Experiment
+experiment:
+  name: ${now:%Y-%m-%d_%H-%M-%S}
+  output_dir: ./outputs/${experiment.name}
+  seed: 42
+
+# Device
+device: cuda  # cuda, cpu, mps
+ddp: true # use all available GPUs
+gpu_ids: null  # Specific GPU IDs to use (null = all available)
+
+# Paths
+paths:
+  model_dir: ./ElektroNN/modelparams/04-20-33/
+  basis_params: ./ElektroNN/basisfunction_params.pkl
+  data_root: ./data
+
+# Model
+model:
+  num_folds: 5
+  use_all_folds: true
+  specific_folds: null
+  aggregation: mean
+  suppress_warnings: true
+
+# Inference
+inference:
+  batch_size: 16
+  num_workers: 8
+  pin_memory: true
+  prefetch_factor: 2
+  show_progress: true
+  return_std: true
+  error_strategy: skip
+
+# Logging
+logging:
+  level: INFO
+
+# Convert (for eddde-convert command)
+convert:
+  output_sdf: null
+  optimize_geometry: false
+
+# Hydra
+hydra:
+  run:
+    dir: ${experiment.output_dir}
+  job:
+    chdir: false

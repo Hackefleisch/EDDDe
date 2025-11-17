@@ -24,6 +24,7 @@ dependencies = [
     "hydra-core",
     "tqdm",
     "mlflow>=3.4.0",
+    "ElektroNN @ git+https://github.com/Hackefleisch/ElektroNN.git"
 ]
 
 [project.optional-dependencies]

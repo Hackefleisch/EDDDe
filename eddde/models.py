@@ -289,10 +289,17 @@ class EnsemblePredictor:
         # Move data to device
         data = data.to(self.device)
 
-        # Collect predictions from all models
+        # Create mask based on exp: zero out positions where exp == 0
+        mask = torch.where(
+            data.exp == 0,
+            torch.zeros_like(data.exp),
+            torch.ones_like(data.exp)
+        ).detach()
+
+        # Collect predictions from all models and apply mask
         predictions = []
         for model in self.models:
-            pred = model(data)
+            pred = model(data) * mask
             predictions.append(pred)
 
         # Stack predictions [num_models, num_atoms, num_features]
@@ -337,10 +344,17 @@ class EnsemblePredictor:
         # Move batch to device
         batch = batch.to(self.device)
 
-        # Collect predictions from all models
+        # Create mask based on exp: zero out positions where exp == 0
+        mask = torch.where(
+            batch.exp == 0,
+            torch.zeros_like(batch.exp),
+            torch.ones_like(batch.exp)
+        ).detach()
+
+        # Collect predictions from all models and apply mask
         predictions = []
         for model in self.models:
-            pred = model(batch)
+            pred = model(batch) * mask
             predictions.append(pred)
 
         # Stack predictions [num_models, total_atoms_in_batch, num_features]

@@ -1,0 +1,5 @@
+# AID2258 Actives Dataset - QSAR Benchmark
+defaults:
+  - qsar_defaults
+
+csv_file: ${paths.data_root}/qsar/AID2258_actives.csv

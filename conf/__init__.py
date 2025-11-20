@@ -1,2 +1,0 @@
-# Hydra configuration package
-

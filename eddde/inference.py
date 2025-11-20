@@ -280,9 +280,6 @@ class BatchProcessor:
                 print(f"Error during batch processing: {e}")
                 print("Continuing with next batch...")
                 return {}
-            elif self.error_strategy == "collect":
-                print(f"Error collected: {e}")
-                return {}
 
     def _save_predictions(
         self,

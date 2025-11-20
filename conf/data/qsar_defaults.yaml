@@ -1,0 +1,10 @@
+# QSAR Dataset Defaults
+# Common configuration for all QSAR benchmark datasets
+csv_file: null  # Override in specific configs
+smiles_col: SMILES
+id_col: CID
+sdf_file: null
+cache_conformers: false
+conformer_seed: 42069
+filter_bad_atoms: true
+verbose: false

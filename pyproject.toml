@@ -24,6 +24,7 @@ dependencies = [
     "tqdm",
     "mlflow>=3.4.0",
     "elektronn",
+    "pot>=0.9.6.post1",
 ]
 
 [project.optional-dependencies]

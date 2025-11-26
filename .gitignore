@@ -1,7 +1,8 @@
 # custom 
-data/SMRT
-data/WellQrate
-data/qsar
+data/SMRT/*
+!data/SMRT/SMART_dataset_enn_short.csv
+data/welQrate/*/*
+!data/welQrate/*/*enn.csv
 outputs/
 mlruns/
 *.npy

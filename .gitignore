@@ -6,6 +6,8 @@ data/welQrate/*/*
 outputs/
 mlruns/
 *.npy
+data/conformers/*
+data/rotated/*
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

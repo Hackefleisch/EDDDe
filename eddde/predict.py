@@ -15,7 +15,11 @@ import torch.nn as nn
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from .data import create_dataset_from_csv, create_dataset_from_sdf
+from .data import (
+    create_dataset_from_csv,
+    create_dataset_from_sdf,
+    ensure_conformers_pregenerated,
+)
 from .models import load_basis_function_params, ModelManager, EnsemblePredictor
 from .inference import InferenceEngine
 
@@ -36,26 +40,50 @@ def run_predict(cfg: DictConfig):
     basis_params = load_basis_function_params(cfg.paths.basis_params)
     print(f"  Loaded parameters for {len(basis_params)} atom types")
 
-    # Create dataset
-    print("\nLoading molecular dataset...")
-    if cfg.data.get("csv_file") is not None:
-        print(f"  Source: CSV file ({cfg.data.csv_file})")
-        dataset = create_dataset_from_csv(
-            csv_path=cfg.data.csv_file,
+    # Determine SDF path for pre-generated conformers
+    output_dir = Path(cfg.experiment.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Use provided SDF or generate from CSV
+    sdf_file = cfg.data.get("sdf_file")
+    csv_file = cfg.data.get("csv_file")
+    
+    # If CSV is provided, ensure conformers are pre-generated
+    if csv_file is not None:
+        # Determine output SDF path
+        if sdf_file is None:
+            # Auto-generate SDF path based on CSV filename
+            csv_path = Path(csv_file)
+            sdf_filename = csv_path.stem + "_conformers.sdf"
+            sdf_file = output_dir / sdf_filename
+        else:
+            sdf_file = Path(sdf_file)
+        
+        # Ensure conformers are pre-generated (will use existing SDF if it exists)
+        sdf_file = ensure_conformers_pregenerated(
+            csv_path=Path(csv_file),
+            sdf_path=sdf_file if sdf_file.exists() else None,
+            output_sdf_path=sdf_file,
             basisfunction_params=basis_params,
             smiles_col=cfg.data.get("smiles_col", "SMILES"),
             id_col=cfg.data.get("id_col", "CID"),
             conformer_seed=cfg.data.get("conformer_seed", 42069),
             filter_bad_atoms=cfg.data.get("filter_bad_atoms", True),
-            verbose=cfg.data.get("verbose", False),
-            cache_conformers=cfg.data.get("cache_conformers", False),
-            pregenerate_conformers=cfg.data.get(
-                "pregenerate_conformers", False),
+            verbose=True,
         )
-    elif cfg.data.get("sdf_file") is not None:
-        print(f"  Source: SDF file ({cfg.data.sdf_file})")
+    elif sdf_file is not None:
+        # Only SDF provided, use it directly
+        sdf_file = Path(sdf_file)
+        if not sdf_file.exists():
+            print(f"Error: SDF file not found: {sdf_file}")
+            sys.exit(1)
+    
+    # Create dataset from SDF (now guaranteed to exist)
+    print("\nLoading molecular dataset...")
+    if sdf_file is not None:
+        print(f"  Source: SDF file ({sdf_file})")
         dataset = create_dataset_from_sdf(
-            sdf_path=cfg.data.sdf_file,
+            sdf_path=sdf_file,
             basisfunction_params=basis_params,
             filter_bad_atoms=cfg.data.get("filter_bad_atoms", True),
             verbose=cfg.data.get("verbose", False),
@@ -135,9 +163,11 @@ def run_predict(cfg: DictConfig):
     )
 
     # Run predictions
+    error_strategy = cfg.inference.get("error_strategy", "skip")
     predictions = engine.predict_dataset(
         dataset,
         return_std=cfg.inference.return_std,
+        error_strategy=error_strategy,
     )
 
     # Save results

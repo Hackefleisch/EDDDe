@@ -13,19 +13,101 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 from datetime import datetime
+from pathlib import Path
+import torch
+import hydra
+from omegaconf import DictConfig, OmegaConf
 
 
-def load_and_preprocess_data():
-    """Load molecular embeddings and preprocess them."""
+def _extract_embedding(pred_value):
+    """
+    Extract embedding from prediction value.
+    
+    Handles multiple formats:
+    - torch.Tensor: convert to numpy
+    - dict with 'mean' key: extract mean tensor
+    - numpy array: use directly
+    
+    Returns numpy array (1D for molecule-level, 2D for atom-level).
+    """
+    # Handle dict format (from inference.py with return_std=True)
+    if isinstance(pred_value, dict):
+        if 'mean' in pred_value:
+            pred_value = pred_value['mean']
+        else:
+            raise ValueError("Dict format must contain 'mean' key")
+    
+    # Convert torch.Tensor to numpy
+    if isinstance(pred_value, torch.Tensor):
+        embed = pred_value.cpu().numpy()
+    elif isinstance(pred_value, np.ndarray):
+        embed = pred_value
+    else:
+        raise ValueError(f"Unsupported prediction format: {type(pred_value)}")
+    
+    return embed
+
+
+def load_and_preprocess_data(cfg: DictConfig):
+    """
+    Load molecular embeddings and preprocess them.
+    
+    Parameters
+    ----------
+    cfg : DictConfig
+        Hydra configuration object containing paths to prediction files
+        
+    Returns
+    -------
+    X : np.ndarray
+        Feature matrix (n_samples, n_features)
+    y : np.ndarray
+        Binary labels (1 for actives, 0 for inactives)
+    """
     print("Loading molecular embeddings...")
-    actives = pickle.load(open('/home/jderiz/EDDDe/data/qsar/embeddings/AID435034/actives/preds_extended.pkl', 'rb'))
-    inactives = pickle.load(open('/home/jderiz/EDDDe/data/qsar/embeddings/AID435034/inactives/preds_extended.pkl', 'rb'))
+    
+    # Get paths from config
+    actives_path = Path(cfg.svm.actives_predictions)
+    inactives_path = Path(cfg.svm.inactives_predictions)
+    
+    if not actives_path.exists():
+        raise FileNotFoundError(f"Actives predictions file not found: {actives_path}")
+    if not inactives_path.exists():
+        raise FileNotFoundError(f"Inactives predictions file not found: {inactives_path}")
+    
+    print(f"  Loading actives from: {actives_path}")
+    print(f"  Loading inactives from: {inactives_path}")
+    
+    # Load prediction files
+    with open(actives_path, 'rb') as f:
+        actives = pickle.load(f)
+    with open(inactives_path, 'rb') as f:
+        inactives = pickle.load(f)
     
     print(f"Loaded {len(actives)} active compounds and {len(inactives)} inactive compounds")
     
-    # Compute mean embeddings along atom axis
-    actives_mean = [np.mean(embed, axis=0) for embed in actives.values()]
-    inactives_mean = [np.mean(embed, axis=0) for embed in inactives.values()]
+    # Extract and process embeddings
+    actives_mean = []
+    for mol_name, pred_value in actives.items():
+        embed = _extract_embedding(pred_value)
+        # If 2D (atom-level), compute mean along atom axis; if 1D (molecule-level), use directly
+        if embed.ndim == 2:
+            actives_mean.append(np.mean(embed, axis=0))
+        elif embed.ndim == 1:
+            actives_mean.append(embed)
+        else:
+            raise ValueError(f"Unexpected embedding shape: {embed.shape}")
+    
+    inactives_mean = []
+    for mol_name, pred_value in inactives.items():
+        embed = _extract_embedding(pred_value)
+        # If 2D (atom-level), compute mean along atom axis; if 1D (molecule-level), use directly
+        if embed.ndim == 2:
+            inactives_mean.append(np.mean(embed, axis=0))
+        elif embed.ndim == 1:
+            inactives_mean.append(embed)
+        else:
+            raise ValueError(f"Unexpected embedding shape: {embed.shape}")
     
     # Combine data
     X = np.concatenate([actives_mean, inactives_mean])
@@ -35,7 +117,7 @@ def load_and_preprocess_data():
     return X, y
 
 
-def comprehensive_cross_validation(X, y, model, cv_folds=5):
+def cross_validation(X, y, model, cv_folds=5):
     """Perform comprehensive cross-validation with all classification metrics."""
     print(f"\nPerforming {cv_folds}-fold cross-validation...")
     
@@ -71,7 +153,7 @@ def comprehensive_cross_validation(X, y, model, cv_folds=5):
         
         # Calculate metrics
         metrics['accuracy'].append(accuracy_score(y_test, y_pred))
-        metrics['precision'].append(precision_score(y_test, y_pred, zero_division=0))
+        metrics['precision'].append(precision_score(y_test, y_pred, zero_division='warn'))
         metrics['recall'].append(recall_score(y_test, y_pred))
         metrics['f1'].append(f1_score(y_test, y_pred))
         metrics['roc_auc'].append(roc_auc_score(y_test, y_proba))
@@ -126,14 +208,14 @@ def grid_search_optimization(X, y, cv_folds=5):
 
 
 def evaluate_best_model(X, y, best_model, scaler, cv_folds=5):
-    """Evaluate the best model with comprehensive metrics."""
-    print("\nEvaluating best model with comprehensive metrics...")
+    """Evaluate the best model with cross-validation metrics."""
+    print("\nEvaluating best model with cross-validation metrics...")
     
     # Scale features
     X_scaled = scaler.transform(X)
     
-    # Perform comprehensive cross-validation
-    results, fold_metrics = comprehensive_cross_validation(X_scaled, y, best_model, cv_folds)
+    # Perform cross-validation
+    results, fold_metrics = cross_validation(X_scaled, y, best_model, cv_folds)
     
     # Print summary results
     print("\n" + "="*60)
@@ -220,26 +302,36 @@ def save_model_and_scaler(model, scaler, best_params, results, save_dir):
     
     return model_path, scaler_path, results_path
 
-
-def main():
-    # Load and preprocess data
-    X, y = load_and_preprocess_data()
-
-    # remove test data 
-    X, X_test, y, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
+def run_svm(cfg: DictConfig):
+    """Run SVM classification on molecular embeddings."""
+    print("=" * 60)
+    print("EDDDe - SVM Classification")
+    print("=" * 60)
+    print(OmegaConf.to_yaml(cfg))
     
+    # Load and preprocess data
+    X, y = load_and_preprocess_data(cfg)
+
+    # Remove test data 
+    X, X_test, y, y_test = train_test_split(
+        X, y, 
+        test_size=cfg.svm.get("test_size", 0.2), 
+        random_state=cfg.experiment.get("seed", 42)
+    )
+
     print("Train data:", len(X))
     print("Train positives:", sum(y))
     print("Test data:", len(X_test))
     print("Test positives:", sum(y_test))
+    
     # Perform grid search optimization
-    best_model, best_params, scaler = grid_search_optimization(X, y)
+    cv_folds = cfg.svm.get("cv_folds", 5)
+    best_model, best_params, scaler = grid_search_optimization(X, y, cv_folds=cv_folds)
     
     # Evaluate best model
     results, fold_metrics = evaluate_best_model(X_test, y_test, best_model, scaler)
     
-    # Final evaluation on full dataset for detailed metrics
+    # Final evaluation on test set for detailed metrics
     print("\n" + "="*60)
     print("FINAL MODEL EVALUATION")
     print("="*60)
@@ -259,11 +351,13 @@ def main():
     
     # Plot ROC curve
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    roc_save_path = f'/home/jderiz/EDDDe/data/qsar/embeddings/AID435034/roc_curve_{timestamp}.png'
-    fpr, tpr, roc_auc = plot_roc_curve(y_test, y_proba, save_path=roc_save_path)
+    output_dir = Path(cfg.svm.get("output_dir", cfg.experiment.output_dir))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    roc_save_path = output_dir / f'roc_curve_{timestamp}.png'
+    fpr, tpr, roc_auc = plot_roc_curve(y_test, y_proba, save_path=str(roc_save_path))
     
-    # Save model and results to parent folder
-    save_dir = '/home/jderiz/EDDDe/data/qsar/embeddings/AID435034'
+    # Save model and results
+    save_dir = str(output_dir)
     model_path, scaler_path, results_path = save_model_and_scaler(
         best_model, scaler, best_params, results, save_dir
     )
@@ -277,6 +371,12 @@ def main():
     print(f"Results saved to: {results_path}")
     
     return best_model, best_params, results
+
+
+@hydra.main(version_base=None, config_path="../conf", config_name="config")
+def main(cfg: DictConfig):
+    """Run SVM classification on molecular embeddings."""
+    run_svm(cfg)
 
 
 if __name__ == "__main__":

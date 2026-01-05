@@ -75,6 +75,7 @@ class InferenceEngine:
         self,
         dataset: MoleculeDataset,
         return_std: bool = True,
+        error_strategy: str = "skip",
     ) -> Dict[str, torch.Tensor]:
         """
         Perform batch prediction on an entire dataset.
@@ -85,6 +86,9 @@ class InferenceEngine:
             Dataset to predict on
         return_std : bool, optional
             Whether to include uncertainty estimates (default: True)
+        error_strategy : str, optional
+            How to handle errors: 'skip' (skip failed molecules) or 'stop' (raise exception)
+            (default: 'skip')
 
         Returns
         -------
@@ -92,46 +96,114 @@ class InferenceEngine:
             Dictionary mapping molecule names to prediction tensors.
             If return_std is True, each tensor contains both mean and std.
         """
-        # Create DataLoader
+        predictions = {}
+        failed_molecules = []
+        num_workers = self.num_workers
+
+        # Try with multi-worker DataLoader first
+        if num_workers > 0:
+            try:
+                dataloader = GeometricDataLoader(
+                    dataset,
+                    batch_size=self.batch_size,
+                    num_workers=num_workers,
+                    pin_memory=self.pin_memory,
+                    prefetch_factor=self.prefetch_factor,
+                    shuffle=False,
+                )
+
+                iterator = tqdm(
+                    dataloader, desc="Predicting") if self.show_progress else dataloader
+
+                for batch in iterator:
+                    batch = batch.to(self.device)
+
+                    # Get predictions
+                    if return_std:
+                        pred_mean, pred_std = self.predictor.predict_batch(
+                            batch, return_std=True)
+                    else:
+                        pred_mean = self.predictor.predict_batch(
+                            batch, return_std=False)
+
+                    # Separate predictions by molecule
+                    for i in range(len(batch.filename)):
+                        mol_name = batch.filename[i]
+                        mask = batch.batch == i
+
+                        if return_std:
+                            # Store mean and std together
+                            predictions[mol_name] = {
+                                "mean": pred_mean[mask].cpu(),
+                                "std": pred_std[mask].cpu(),
+                            }
+                        else:
+                            predictions[mol_name] = pred_mean[mask].cpu()
+
+                return predictions
+
+            except RuntimeError as e:
+                # Check if it's a DataLoader worker error
+                if "DataLoader worker" in str(e) or "Failed to generate 3D conformer" in str(e):
+                    if error_strategy == "stop":
+                        raise
+                    # Fall back to single-threaded processing
+                    print("\nWarning: DataLoader worker error detected (conformer generation failure).")
+                    print("Switching to single-threaded processing to handle problematic molecules...")
+                    num_workers = 0
+                else:
+                    # Re-raise if it's a different error
+                    raise
+
+        # Single-threaded processing (either requested or as fallback)
         dataloader = GeometricDataLoader(
             dataset,
             batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
+            num_workers=0,  # Single-threaded
+            pin_memory=False,  # Not needed for single-threaded
             shuffle=False,
         )
 
-        predictions = {}
-
-        # Iterate through batches
         iterator = tqdm(
             dataloader, desc="Predicting") if self.show_progress else dataloader
 
-        for batch in iterator:
-            batch = batch.to(self.device)
+        for batch_idx, batch in enumerate(iterator):
+            try:
+                batch = batch.to(self.device)
 
-            # Get predictions
-            if return_std:
-                pred_mean, pred_std = self.predictor.predict_batch(
-                    batch, return_std=True)
-            else:
-                pred_mean = self.predictor.predict_batch(
-                    batch, return_std=False)
-
-            # Separate predictions by molecule
-            for i in range(len(batch.filename)):
-                mol_name = batch.filename[i]
-                mask = batch.batch == i
-
+                # Get predictions
                 if return_std:
-                    # Store mean and std together
-                    predictions[mol_name] = {
-                        "mean": pred_mean[mask].cpu(),
-                        "std": pred_std[mask].cpu(),
-                    }
+                    pred_mean, pred_std = self.predictor.predict_batch(
+                        batch, return_std=True)
                 else:
-                    predictions[mol_name] = pred_mean[mask].cpu()
+                    pred_mean = self.predictor.predict_batch(
+                        batch, return_std=False)
+
+                # Separate predictions by molecule
+                for i in range(len(batch.filename)):
+                    mol_name = batch.filename[i]
+                    mask = batch.batch == i
+
+                    if return_std:
+                        # Store mean and std together
+                        predictions[mol_name] = {
+                            "mean": pred_mean[mask].cpu(),
+                            "std": pred_std[mask].cpu(),
+                        }
+                    else:
+                        predictions[mol_name] = pred_mean[mask].cpu()
+
+            except Exception as e:
+                if error_strategy == "stop":
+                    raise
+                # Skip this batch and continue
+                if self.show_progress:
+                    print(f"\nWarning: Error processing batch {batch_idx}: {e}")
+                    print("Skipping batch and continuing...")
+                failed_molecules.extend(batch.filename if hasattr(batch, 'filename') else [f"batch_{batch_idx}"])
+
+        if failed_molecules and self.show_progress:
+            print(f"\nWarning: Failed to process {len(failed_molecules)} molecules")
 
         return predictions
 
@@ -279,6 +351,9 @@ class BatchProcessor:
             elif self.error_strategy == "skip":
                 print(f"Error during batch processing: {e}")
                 print("Continuing with next batch...")
+                return {}
+            else:
+                # Default to returning empty dict
                 return {}
 
     def _save_predictions(

@@ -50,6 +50,7 @@ from .data import (
     create_dataset_from_sdf,
     convert_smiles_to_sdf,
     convert_csv_to_sdf,
+    ensure_conformers_pregenerated,
 )
 
 from .models import (
@@ -75,6 +76,7 @@ __all__ = [
     "create_dataset_from_sdf",
     "convert_smiles_to_sdf",
     "convert_csv_to_sdf",
+    "ensure_conformers_pregenerated",
     # Models
     "ModelManager",
     "EnsemblePredictor",

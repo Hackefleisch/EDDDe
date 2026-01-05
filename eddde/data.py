@@ -88,7 +88,8 @@ class MoleculeDataset(Dataset):
         self.bad_atom_count = 0
 
         # Cache for 3D conformers (only used if cache_conformers is True)
-        self.conformer_cache: Dict[int, Chem.Mol] = {}
+        # Note: Values can be None to mark failed conformer generation
+        self.conformer_cache: Dict[int, Optional[Chem.Mol]] = {}
 
         # Load and validate molecules
         self._load_molecules(smiles_dict, filter_bad_atoms)
@@ -149,29 +150,43 @@ class MoleculeDataset(Dataset):
         -------
         Data
             PyTorch Geometric Data object with molecular graph
+
+        Raises
+        ------
+        RuntimeError
+            If conformer generation fails (this will be caught by the inference engine)
         """
         name = self.names[index]
 
-        # Check if conformer is cached
-        if self.cache_conformers and index in self.conformer_cache:
-            mol_with_h = self.conformer_cache[index]
-        else:
-            # Generate new conformer
-            mol = self.mols[index]
-            mol_with_h = self._generate_conformer(mol, name)
+        try:
+            # Check if conformer is cached
+            if self.cache_conformers and index in self.conformer_cache:
+                mol_with_h = self.conformer_cache[index]
+            else:
+                # Generate new conformer
+                mol = self.mols[index]
+                mol_with_h = self._generate_conformer(mol, name)
 
-            # Cache if enabled
-            if self.cache_conformers:
-                self.conformer_cache[index] = mol_with_h
+                # Cache if enabled
+                if self.cache_conformers:
+                    self.conformer_cache[index] = mol_with_h
 
-        # Convert to PyTorch Geometric Data
-        data_mol = data_from_rdkit(mol_with_h, name, self.basisfunction_params)
+            # Convert to PyTorch Geometric Data
+            data_mol = data_from_rdkit(mol_with_h, name, self.basisfunction_params)
 
-        # Apply optional transform
-        if self.transform is not None:
-            data_mol = self.transform(data_mol)
+            # Apply optional transform
+            if self.transform is not None:
+                data_mol = self.transform(data_mol)
 
-        return data_mol
+            return data_mol
+        except RuntimeError as e:
+            # Re-raise with molecule name for better error tracking
+            if "Failed to generate 3D conformer" in str(e):
+                if self.verbose:
+                    print(f"Warning: Skipping molecule {name} due to conformer generation failure")
+                # Create a custom exception that includes the molecule name
+                raise RuntimeError(f"Failed to generate 3D conformer for molecule {name}") from e
+            raise
 
     def _generate_conformer(self, mol: Chem.Mol, name: str) -> Chem.Mol:
         """
@@ -838,3 +853,109 @@ def convert_csv_to_sdf(
 
     # Convert to SDF
     return convert_smiles_to_sdf(smiles_dict, output_sdf_path, **converter_kwargs)
+
+
+def ensure_conformers_pregenerated(
+    csv_path: Optional[Path],
+    sdf_path: Optional[Path],
+    output_sdf_path: Path,
+    basisfunction_params: Dict,
+    smiles_col: str = "SMILES",
+    id_col: str = "CID",
+    conformer_seed: int = 42069,
+    filter_bad_atoms: bool = True,
+    verbose: bool = True,
+) -> Path:
+    """
+    Ensure conformers are pre-generated to SDF file.
+
+    If an SDF file already exists at output_sdf_path, it will be used.
+    Otherwise, conformers will be generated from CSV and saved to SDF.
+    Failed molecules are skipped gracefully.
+
+    Parameters
+    ----------
+    csv_path : Path, optional
+        Path to CSV file containing SMILES (required if sdf_path is None)
+    sdf_path : Path, optional
+        Path to existing SDF file (if provided, will be used directly)
+    output_sdf_path : Path
+        Path where the SDF file should be written/read from
+    basisfunction_params : Dict
+        Basis function parameters for filtering unsupported atoms
+    smiles_col : str, optional
+        Name of the column containing SMILES strings (default: 'SMILES')
+    id_col : str, optional
+        Name of the column containing molecule IDs (default: 'CID')
+    conformer_seed : int, optional
+        Random seed for conformer generation (default: 42069)
+    filter_bad_atoms : bool, optional
+        Whether to filter molecules with unsupported atoms (default: True)
+    verbose : bool, optional
+        Whether to print progress information (default: True)
+
+    Returns
+    -------
+    Path
+        Path to the SDF file (either existing or newly generated)
+
+    Raises
+    ------
+    ValueError
+        If neither csv_path nor sdf_path is provided
+    FileNotFoundError
+        If csv_path is provided but doesn't exist
+    """
+    output_sdf_path = Path(output_sdf_path)
+
+    # If SDF already exists, use it
+    if output_sdf_path.exists():
+        if verbose:
+            print(f"  Using existing SDF file: {output_sdf_path}")
+        return output_sdf_path
+
+    # If sdf_path is provided and exists, copy it or use it
+    if sdf_path is not None:
+        sdf_path = Path(sdf_path)
+        if sdf_path.exists():
+            if verbose:
+                print(f"  Using provided SDF file: {sdf_path}")
+            return sdf_path
+
+    # Need to generate from CSV
+    if csv_path is None:
+        raise ValueError(
+            "Cannot generate conformers: csv_path must be provided when SDF doesn't exist"
+        )
+
+    csv_path = Path(csv_path)
+    if not csv_path.exists():
+        raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+    if verbose:
+        print(f"  Pre-generating conformers from CSV to SDF...")
+        print(f"    Input CSV: {csv_path}")
+        print(f"    Output SDF: {output_sdf_path}")
+
+    # Generate conformers with error handling
+    success_count, failed_count = convert_csv_to_sdf(
+        csv_path=csv_path,
+        output_sdf_path=output_sdf_path,
+        smiles_col=smiles_col,
+        id_col=id_col,
+        conformer_seed=conformer_seed,
+        filter_bad_atoms=filter_bad_atoms,
+        basisfunction_params=basisfunction_params if filter_bad_atoms else None,
+        verbose=verbose,
+    )
+
+    if verbose:
+        print(f"  Pre-generation complete: {success_count} successful, {failed_count} failed")
+
+    if success_count == 0:
+        raise RuntimeError(
+            f"Failed to generate any conformers from {csv_path}. "
+            "Please check the input file and molecule validity."
+        )
+
+    return output_sdf_path

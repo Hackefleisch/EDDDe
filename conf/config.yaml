@@ -51,6 +51,14 @@ convert:
   output_sdf: null
   optimize_geometry: false
 
+# SVM Classification
+svm:
+  actives_predictions: ${paths.data_root}/qsar/embeddings/AID435034/actives/preds_extended.pkl
+  inactives_predictions: ${paths.data_root}/qsar/embeddings/AID435034/inactives/preds_extended.pkl
+  output_dir: ${experiment.output_dir}  # Override to save to specific location
+  test_size: 0.2
+  cv_folds: 5
+
 # Hydra
 hydra:
   run:

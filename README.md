@@ -22,9 +22,10 @@ The Jupyter Notebooks serve as interactive environments to evaluate benchmark pr
 
 # Installation
 
-EDDDe relies on the `ElektroNN` package which is currently under development. You must have access to it before using this repository.
+EDDDe relies on the `ElektroNN` package which is currently under development. You must have SSH access to its GitHub repository (`git@github.com:Hackefleisch/ElektroNN`), as `uv` will automatically fetch and install it from source during the `EDDDe` installation process.
 
 ## Git Repository
+Clone this repository to your local machine:
 ```bash
 git clone git@github.com:Hackefleisch/EDDDe.git
 ```

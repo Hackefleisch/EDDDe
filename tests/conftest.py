@@ -5,6 +5,8 @@ Pytest configuration and shared fixtures for EDDDe tests.
 import tempfile
 import shutil
 from pathlib import Path
+from importlib.resources import read_binary
+import pickle
 
 import pytest
 import torch
@@ -15,23 +17,9 @@ from eddde.models import load_basis_function_params, DEFAULT_MODEL_KWARGS
 
 @pytest.fixture(scope="session")
 def basis_params():
-    """Load real basis function parameters."""
-    # Path relative to project root (where pytest runs from)
-    params_path = Path("./ElektroNN/basisfunction_params.pkl")
-
-    if not params_path.exists():
-        # Try absolute path as fallback
-        import os
-        cwd = Path(os.getcwd())
-        params_path = cwd / "ElektroNN" / "basisfunction_params.pkl"
-
-    if not params_path.exists():
-        raise FileNotFoundError(
-            f"Basis function parameters not found at {params_path}. "
-            f"Please ensure ElektroNN/basisfunction_params.pkl exists."
-        )
-
-    return load_basis_function_params(params_path)
+    """Load real basis function parameters from elektronn."""
+    basisfunction_params_binary = read_binary("elektronn.models", "basisfunction_params.pkl")
+    return pickle.loads(basisfunction_params_binary)
 
 
 @pytest.fixture

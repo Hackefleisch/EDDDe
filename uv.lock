@@ -1483,7 +1483,7 @@ dev = [{ name = "pytest-cov", specifier = ">=7.0.0" }]
 [[package]]
 name = "elektronn"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/Hackefleisch/ElektroNN#e7cfef0004102c747684d0d300db69506714bb7d" }
+source = { git = "ssh://git@github.com/Hackefleisch/ElektroNN#7774b93887a92188b80ac688107586584266a460" }
 dependencies = [
     { name = "aiohappyeyeballs" },
     { name = "aiohttp" },

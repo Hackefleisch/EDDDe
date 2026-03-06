@@ -17,7 +17,54 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from torch_geometric.data import Data
 
-from elektronn.elektronn_ensemble_predict import data_from_rdkit
+# `data_from_rdkit` was removed from `elektronn_ensemble_predict`.
+# Re-implementing a compatible version here or utilizing the one in `dataset.py`.
+
+
+def _data_from_rdkit(mol: Chem.Mol, name: str, basisfunction_params: dict):
+    '''
+    Convert RDKit mol to PyTorch Geometric Data object using provided basis function params.
+    '''
+    atom_types, positions = [], []
+
+    for i in range(mol.GetNumAtoms()):
+        atomic_number = float(mol.GetAtomWithIdx(i).GetAtomicNum())
+        pos = mol.GetConformer().GetAtomPosition(i)
+
+        if atomic_number not in basisfunction_params:
+            raise ValueError(f"Atomic number {atomic_number} is not in the provided basis function list")
+
+        atom_types.append(atomic_number)
+        positions.append([pos.x, pos.y, pos.z])
+    atoms = np.array(atom_types)
+    positions = torch.tensor(np.array(positions))
+
+    exponents = torch.stack([basisfunction_params[at]["exp"] for at in atom_types])
+    norms = torch.stack([basisfunction_params[at]["norm"] for at in atom_types])
+    atom_types = torch.tensor(np.array(atom_types))
+
+    num_atom_types = 18
+    onehot = np.eye(num_atom_types)[atoms.astype(int)]
+
+    x = torch.tensor(onehot)
+    pos = positions.detach().clone()
+    atomic_numbers = atom_types.detach().clone()
+    exp = exponents.detach().clone()
+    norm = norms.detach().clone()
+
+    mask = torch.where(exp == 0, torch.zeros_like(exp), torch.ones_like(exp))
+
+    data = Data(
+        pos=pos.to(torch.float32),
+        x=x.to(torch.float32),
+        exp=exp.to(torch.float32),
+        norm=norm.to(torch.float32),
+        atomic_numbers=atomic_numbers,
+        name=name,
+        mask=mask,
+    )
+
+    return data
 
 
 class MoleculeDataset(Dataset):
@@ -165,7 +212,7 @@ class MoleculeDataset(Dataset):
                 self.conformer_cache[index] = mol_with_h
 
         # Convert to PyTorch Geometric Data
-        data_mol = data_from_rdkit(mol_with_h, name, self.basisfunction_params)
+        data_mol = _data_from_rdkit(mol_with_h, name, self.basisfunction_params)
 
         # Apply optional transform
         if self.transform is not None:
@@ -532,7 +579,7 @@ class SDFMoleculeDataset(Dataset):
 
         # Convert to PyTorch Geometric Data
         # Molecule already has conformer from SDF
-        data_mol = data_from_rdkit(mol, name, self.basisfunction_params)
+        data_mol = _data_from_rdkit(mol, name, self.basisfunction_params)
 
         # Apply optional transform
         if self.transform is not None:

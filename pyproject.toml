@@ -38,10 +38,7 @@ test = [
     "scipy",
 ]
 
-[project.scripts]
-eddde = "eddde.eddde:main"
-eddde-convert = "eddde.convert:main"
-eddde-predict = "eddde.predict:main"
+
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -1,0 +1,39 @@
+Loading dataset from /media/iwe20/DataSSD/QM40_dataset/QM40_main.csv...
+Calculating correlation matrix...
+
+--- Correlation Matrix ---
+                Internal_E(0K)   HOMO   LUMO  HL_gap  Polarizability  spatial extent  dipol_mom    ZPE  Inter_E(298)  Enthalpy  Free_E     CV  Entropy
+Internal_E(0K)           1.000 -0.266  0.432  -0.497          -0.756          -0.712     -0.259 -0.544         1.000     1.000   1.000 -0.701   -0.712
+HOMO                    -0.266  1.000 -0.052   0.521           0.490           0.408      0.218  0.446        -0.266    -0.266  -0.266  0.432    0.407
+LUMO                     0.432 -0.052  1.000  -0.879          -0.380          -0.340     -0.148 -0.044         0.433     0.433   0.433 -0.220   -0.231
+HL_gap                  -0.497  0.521 -0.879   1.000           0.558           0.486      0.230  0.250        -0.497    -0.497  -0.497  0.394    0.391
+Polarizability          -0.756  0.490 -0.380   0.558           1.000           0.933      0.286  0.886        -0.756    -0.756  -0.756  0.956    0.947
+spatial extent          -0.712  0.408 -0.340   0.486           0.933           1.000      0.262  0.830        -0.712    -0.712  -0.712  0.905    0.918
+dipol_mom               -0.259  0.218 -0.148   0.230           0.286           0.262      1.000  0.245        -0.259    -0.259  -0.259  0.285    0.282
+ZPE                     -0.544  0.446 -0.044   0.250           0.886           0.830      0.245  1.000        -0.543    -0.543  -0.543  0.962    0.943
+Inter_E(298)             1.000 -0.266  0.433  -0.497          -0.756          -0.712     -0.259 -0.543         1.000     1.000   1.000 -0.701   -0.712
+Enthalpy                 1.000 -0.266  0.433  -0.497          -0.756          -0.712     -0.259 -0.543         1.000     1.000   1.000 -0.701   -0.712
+Free_E                   1.000 -0.266  0.433  -0.497          -0.756          -0.712     -0.259 -0.543         1.000     1.000   1.000 -0.701   -0.712
+CV                      -0.701  0.432 -0.220   0.394           0.956           0.905      0.285  0.962        -0.701    -0.701  -0.701  1.000    0.991
+Entropy                 -0.712  0.407 -0.231   0.391           0.947           0.918      0.282  0.943        -0.712    -0.712  -0.712  0.991    1.000
+
+Finding subset of 4 properties with minimal correlation among themselves...
+
+--- Best Subset of 4 Properties (min-max absolute correlation: 0.407) ---
+['HOMO', 'LUMO', 'dipol_mom', 'Entropy']
+
+Their correlation sub-matrix:
+            HOMO   LUMO  dipol_mom  Entropy
+HOMO       1.000 -0.052      0.218    0.407
+LUMO      -0.052  1.000     -0.148   -0.231
+dipol_mom  0.218 -0.148      1.000    0.282
+Entropy    0.407 -0.231      0.282    1.000
+
+--- Previously Used Subset: ['Polarizability', 'dipol_mom', 'CV', 'Entropy'] ---
+Their correlation sub-matrix:
+                Polarizability  dipol_mom     CV  Entropy
+Polarizability           1.000      0.286  0.956    0.947
+dipol_mom                0.286      1.000  0.285    0.282
+CV                       0.956      0.285  1.000    0.991
+Entropy                  0.947      0.282  0.991    1.000
+Max absolute correlation in previously used subset: 0.991

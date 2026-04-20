@@ -32,7 +32,7 @@ from .data import DATASETS
 from .data.base import STAGE_ORDER, Stage, stage_path
 from .data.pipeline import build_up_to
 from .experiments import EXPERIMENTS
-from .experiments.base import result_dir
+from .experiments.base import RESULTS_ROOT, result_dir
 from .methods import METHODS
 from .methods.base import embedding_path, load_embeddings, save_embeddings
 
@@ -130,6 +130,8 @@ def main() -> None:
             for m_id, method in METHODS.items():
                 _embed_if_stale(method, ds_id, stage_data)
                 _run_experiment_if_stale(exp, method, ds_id, stage_data)
+        if hasattr(exp, "make_plots"):
+            exp.make_plots(RESULTS_ROOT / exp_id, list(METHODS.keys()))
 
 
 if __name__ == "__main__":

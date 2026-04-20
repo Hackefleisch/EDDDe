@@ -4,6 +4,9 @@ Metrics (§6.1):
   M-MONO   — Spearman ρ between |i−j| and d(i,j) over all pairs. Range [-1,1]; 1 = perfect.
   M-SMOOTH — Std dev of consecutive-distance ratios d(k,k+1)/d(k-1,k). Lower is smoother.
   M-LIN    — R² of linear regression of d(mol_1, mol_k) vs k.
+
+Plot (§8):
+  One subplot per series; x = chain length, y = d(mol_1, mol_k); methods overlaid.
 """
 from __future__ import annotations
 
@@ -11,11 +14,23 @@ import json
 from itertools import combinations
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import linregress, spearmanr
 
+from ..cache import hash_file, is_stale, write_manifest
 from ..data.base import Stage
+from .base import result_dir
+
+
+SERIES_LABELS = {
+    "S1": "n-Alkanes",
+    "S2": "n-Alkanols",
+    "S3": "n-Alkanoic acids",
+    "S4": "n-Alkylamines",
+    "S5": "Polyethylene glycols",
+}
 
 
 def _m_smooth(consecutive_distances: list[float]) -> float:
@@ -42,7 +57,7 @@ def _m_lin(positions: list[int], distances_from_first: list[float]) -> tuple[flo
 
 class Exp1Homologous:
     id = "EXP-1"
-    version = "v4-mlin-pvalue"
+    version = "v5-plots"
     datasets = ["S1", "S2", "S3", "S4", "S5"]
 
     def run(self, method, stage_data, embeddings, dataset_id, out):
@@ -76,11 +91,14 @@ class Exp1Homologous:
             for i in range(len(mol_ids) - 1)
         ]
 
-        # Distances from first molecule d(mol_1, mol_k) — used for M-LIN
+        # Distances from first molecule d(mol_1, mol_k) — saved for plotting
         from_first = [
             method.distance(embeddings[mol_ids[0]], embeddings[mol_ids[k]])
             for k in range(1, len(mol_ids))
         ]
+        pd.DataFrame({"position": positions[1:], "distance": from_first}).to_csv(
+            out / "from_first.csv", index=False
+        )
 
         m_lin, m_lin_p = _m_lin(positions[1:], from_first)
         metrics = {
@@ -98,3 +116,55 @@ class Exp1Homologous:
             )
         )
         return metrics
+
+    def make_plots(self, exp_results_dir: Path, method_ids: list[str]) -> None:
+        plots_dir = exp_results_dir / "plots"
+        plots_dir.mkdir(parents=True, exist_ok=True)
+        out = plots_dir / "distance_from_first.png"
+
+        # Staleness: any from_first.csv newer than the plot
+        input_hashes = {}
+        for m_id in method_ids:
+            for ds_id in self.datasets:
+                p = result_dir(self.id, m_id, ds_id) / "from_first.csv"
+                if p.exists():
+                    input_hashes[f"{m_id}/{ds_id}"] = hash_file(p)
+
+        if not input_hashes:
+            return
+
+        if not is_stale(out, self.version, input_hashes):
+            print(f"  [{self.id}] plots fresh")
+            return
+
+        print(f"  [{self.id}] generating plots...")
+        n = len(self.datasets)
+        ncols = 3
+        nrows = (n + ncols - 1) // ncols
+        fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows), sharey=False)
+        axes_flat = axes.flatten() if n > 1 else [axes]
+
+        for ax_idx, ds_id in enumerate(self.datasets):
+            ax = axes_flat[ax_idx]
+            for m_id in method_ids:
+                csv = result_dir(self.id, m_id, ds_id) / "from_first.csv"
+                if not csv.exists():
+                    continue
+                df = pd.read_csv(csv)
+                ax.plot(df["position"], df["distance"], marker="o", markersize=4, label=m_id)
+            ax.set_title(SERIES_LABELS.get(ds_id, ds_id))
+            ax.set_xlabel("Chain length k")
+            ax.set_ylabel("d(mol₁, molₖ)")
+            ax.legend(fontsize=8)
+            ax.grid(True, alpha=0.3)
+
+        # Hide unused subplots
+        for ax_idx in range(len(self.datasets), len(axes_flat)):
+            axes_flat[ax_idx].set_visible(False)
+
+        fig.suptitle("EXP-1: Distance from first molecule in homologous series", y=1.01)
+        fig.tight_layout()
+        fig.savefig(out, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+        write_manifest(out, version=self.version, inputs=input_hashes, compute_time=0.0)

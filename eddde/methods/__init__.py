@@ -4,6 +4,7 @@ from __future__ import annotations
 from .base import Method
 from .baselines.ecfp import ECFP4, ECFP6, FCFP4
 from .baselines.maccs import MACCSKeys
+from .baselines.atom_pair import AtomPair
 
 
 METHODS: dict[str, Method] = {}
@@ -19,3 +20,4 @@ _register(ECFP4())
 _register(ECFP6())
 _register(FCFP4())
 _register(MACCSKeys())
+_register(AtomPair())

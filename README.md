@@ -77,11 +77,20 @@ New dependencies go in `pyproject.toml` — don't silently assume they are prese
 
 | Component | Status |
 |-----------|--------|
-| Framework skeleton | done |
-| B1 ECFP4 | done |
-| S1 n-alkanes (EXP-1 series) | done |
-| EXP-1 M-MONO metric | done |
-| Remaining baselines (B2–B17) | pending |
-| Remaining datasets / series | pending |
+| Framework skeleton (runner, caching, registries) | done |
+| **Topological fingerprints** | |
+| B1 ECFP4, B2 ECFP6, B3 FCFP4 | done |
+| B4 MACCS keys, B5 Atom Pair, B6 Topological Torsion | done |
+| **EXP-1 datasets** | |
+| S1 n-alkanes, S2 n-alkanols, S3 n-alkanoic acids | done |
+| S4 n-alkylamines, S5 polyethylene glycols | done |
+| **EXP-1 metrics & plots** | |
+| M-MONO, M-SMOOTH, M-LIN (with p-values) | done |
+| Plots: distance from first, all-pairs scatter, consecutive distances | done |
+| **Remaining** | |
+| B7 RDKit 2D descriptors | pending |
+| B8–B17 (3D shape, learned, QM-descriptor baselines) | pending |
+| EXP-2 datasets (S6–S8) and metrics | pending |
+| EXP-3 through EXP-6 | pending |
 | ElektroNN integration | pending |
 | MUT implementations | pending |

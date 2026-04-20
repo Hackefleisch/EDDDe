@@ -6,6 +6,7 @@ from .sources.alkanes import Alkanes
 from .sources.alkanols import Alkanols
 from .sources.alkanoic_acids import AlkanoicAcids
 from .sources.alkylamines import Alkylamines
+from .sources.peg import PEG
 
 
 DATASETS: dict[str, Dataset] = {}
@@ -21,3 +22,4 @@ _register(Alkanes())
 _register(Alkanols())
 _register(AlkanoicAcids())
 _register(Alkylamines())
+_register(PEG())

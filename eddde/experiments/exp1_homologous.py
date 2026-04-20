@@ -162,6 +162,27 @@ class Exp1Homologous:
         self._plot_consecutive_distances(plots_dir, method_ids)
         write_manifest(sentinel, version=self.version, inputs=input_hashes, compute_time=0.0)
 
+    # Direction: +1 = higher is better, -1 = lower is better
+    metric_direction = {"M-MONO": 1, "M-SMOOTH": -1, "M-LIN": 1}
+
+    def collect_results(self, method_ids: list[str]) -> pd.DataFrame:
+        """Return tidy DataFrame: method, dataset, metric, value."""
+        rows = []
+        for m_id in method_ids:
+            for ds_id in self.datasets:
+                p = result_dir(self.id, m_id, ds_id) / "metrics.json"
+                if not p.exists():
+                    continue
+                data = json.loads(p.read_text())
+                for metric in self.metric_direction:
+                    rows.append({
+                        "method": m_id,
+                        "dataset": ds_id,
+                        "metric": metric,
+                        "value": data.get(metric),
+                    })
+        return pd.DataFrame(rows)
+
     def _plot_distance_from_first(self, plots_dir: Path, method_ids: list[str]) -> None:
         fig, axes_flat = _make_grid(len(self.datasets))
         for ax_idx, ds_id in enumerate(self.datasets):

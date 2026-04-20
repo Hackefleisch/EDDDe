@@ -18,6 +18,7 @@ from __future__ import annotations
 import pickle
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .cache import (
@@ -112,6 +113,113 @@ def _run_experiment_if_stale(exp, method, ds_id: str, stage_data: dict) -> None:
     )
 
 
+def _write_summary_md(method_ids: list[str]) -> None:
+    """Write results/SUMMARY.md — per-experiment metric table + cross-metric average rank."""
+    lines: list[str] = ["# EDDDe Benchmark Summary\n"]
+
+    all_avg_ranks: dict[str, list[float]] = {m: [] for m in method_ids}
+
+    for exp_id, exp in EXPERIMENTS.items():
+        if not hasattr(exp, "collect_results") or not hasattr(exp, "metric_direction"):
+            continue
+
+        df = exp.collect_results(method_ids)
+        if df.empty:
+            continue
+
+        metrics = list(exp.metric_direction.keys())
+        n_datasets = len(exp.datasets)
+
+        # --- Per-metric stats: mean ± SE and coverage ---
+        stat_rows: dict[str, dict[str, str]] = {m: {} for m in method_ids}
+        rank_rows: dict[str, dict[str, float]] = {m: {} for m in method_ids}
+
+        for metric in metrics:
+            direction = exp.metric_direction[metric]
+            sub = df[df["metric"] == metric]
+
+            method_vals: dict[str, list[float]] = {}
+            for m_id in method_ids:
+                vals = sub[sub["method"] == m_id]["value"].dropna().tolist()
+                method_vals[m_id] = vals
+
+            # Mean ± SE with coverage
+            for m_id in method_ids:
+                vals = method_vals[m_id]
+                n = len(vals)
+                if n == 0:
+                    stat_rows[m_id][metric] = f"— (0/{n_datasets})"
+                elif n == 1:
+                    stat_rows[m_id][metric] = f"{vals[0]:.3f} (1/{n_datasets})"
+                else:
+                    mean = float(np.mean(vals))
+                    se = float(np.std(vals, ddof=1) / np.sqrt(n))
+                    stat_rows[m_id][metric] = f"{mean:.3f}±{se:.3f} ({n}/{n_datasets})"
+
+            # Rank (lower rank = better). Null → worst rank = n_methods + 1
+            mean_vals: list[tuple[str, float | None]] = []
+            for m_id in method_ids:
+                vals = method_vals[m_id]
+                mean_vals.append((m_id, float(np.mean(vals)) if vals else None))
+
+            # Sort: nonnull first, ordered by direction, then nulls
+            nonnull = [(m, v) for m, v in mean_vals if v is not None]
+            nonnull.sort(key=lambda x: -direction * x[1])  # best first
+            null_methods = [m for m, v in mean_vals if v is None]
+
+            for rank_idx, (m_id, _) in enumerate(nonnull, start=1):
+                rank_rows[m_id][metric] = float(rank_idx)
+            for m_id in null_methods:
+                rank_rows[m_id][metric] = float(len(method_ids) + 1)
+
+        # Accumulate average ranks
+        for m_id in method_ids:
+            ranks = list(rank_rows[m_id].values())
+            if ranks:
+                all_avg_ranks[m_id].append(float(np.mean(ranks)))
+
+        # Average rank per method within this experiment
+        exp_avg_rank: dict[str, float] = {}
+        for m_id in method_ids:
+            ranks = list(rank_rows[m_id].values())
+            exp_avg_rank[m_id] = float(np.mean(ranks)) if ranks else float("nan")
+
+        sorted_methods = sorted(method_ids, key=lambda m: exp_avg_rank.get(m, float("nan")))
+
+        # Build markdown table
+        lines.append(f"\n## {exp_id}\n")
+        header_cols = ["Method"] + [f"{m}" for m in metrics] + ["Avg rank"]
+        lines.append("| " + " | ".join(header_cols) + " |")
+        lines.append("| " + " | ".join(["---"] * len(header_cols)) + " |")
+
+        for m_id in sorted_methods:
+            metric_cells = [stat_rows[m_id].get(m, "—") for m in metrics]
+            avg_r = exp_avg_rank[m_id]
+            avg_str = f"{avg_r:.2f}" if not np.isnan(avg_r) else "—"
+            lines.append("| " + " | ".join([m_id] + metric_cells + [avg_str]) + " |")
+
+        dir_str = ", ".join(f"{m}({'up' if d > 0 else 'down'})" for m, d in exp.metric_direction.items())
+        lines.append(f"\n*Directions: {dir_str}*\n")
+
+    # --- Cross-experiment aggregate ---
+    if any(v for v in all_avg_ranks.values()):
+        lines.append("\n## Cross-experiment average rank\n")
+        lines.append("| Method | Avg rank (all experiments) |")
+        lines.append("| --- | --- |")
+        overall: list[tuple[str, float]] = []
+        for m_id in method_ids:
+            ranks = all_avg_ranks[m_id]
+            overall.append((m_id, float(np.mean(ranks)) if ranks else float("nan")))
+        overall.sort(key=lambda x: x[1])
+        for m_id, avg in overall:
+            avg_str = f"{avg:.2f}" if not np.isnan(avg) else "—"
+            lines.append(f"| {m_id} | {avg_str} |")
+
+    RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
+    (RESULTS_ROOT / "SUMMARY.md").write_text("\n".join(lines) + "\n")
+    print(f"\nSummary written to {RESULTS_ROOT / 'SUMMARY.md'}")
+
+
 def main() -> None:
     max_stage = _max_needed_stage()
 
@@ -132,6 +240,10 @@ def main() -> None:
                 _run_experiment_if_stale(exp, method, ds_id, stage_data)
         if hasattr(exp, "make_plots"):
             exp.make_plots(RESULTS_ROOT / exp_id, list(METHODS.keys()))
+        if hasattr(exp, "summarize"):
+            exp.summarize(RESULTS_ROOT / exp_id, list(METHODS.keys()))
+
+    _write_summary_md(list(METHODS.keys()))
 
 
 if __name__ == "__main__":

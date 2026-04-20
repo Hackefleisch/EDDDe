@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .base import Dataset
 from .sources.alkanes import Alkanes
+from .sources.alkanols import Alkanols
 
 
 DATASETS: dict[str, Dataset] = {}
@@ -15,3 +16,4 @@ def _register(ds: Dataset) -> None:
 
 
 _register(Alkanes())
+_register(Alkanols())

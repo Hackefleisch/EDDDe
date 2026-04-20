@@ -5,8 +5,10 @@ Metrics (§6.1):
   M-SMOOTH — Std dev of consecutive-distance ratios d(k,k+1)/d(k-1,k). Lower is smoother.
   M-LIN    — R² of linear regression of d(mol_1, mol_k) vs k.
 
-Plot (§8):
-  One subplot per series; x = chain length, y = d(mol_1, mol_k); methods overlaid.
+Plots (§8):
+  distance_from_first.png  — x=chain length, y=d(mol_1,mol_k); methods overlaid per series.
+  mono_scatter.png         — x=|i−j|, y=d(i,j) for all pairs; methods overlaid per series.
+  consecutive_distances.png — x=k, y=d(mol_k,mol_{k+1}); methods overlaid per series.
 """
 from __future__ import annotations
 
@@ -55,9 +57,21 @@ def _m_lin(positions: list[int], distances_from_first: list[float]) -> tuple[flo
     return float(r ** 2), float(p)
 
 
+def _make_grid(n_series: int, ncols: int = 3):
+    nrows = (n_series + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows))
+    axes_flat = axes.flatten() if n_series > 1 else [axes]
+    return fig, axes_flat
+
+
+def _hide_unused(axes_flat, n_used: int) -> None:
+    for i in range(n_used, len(axes_flat)):
+        axes_flat[i].set_visible(False)
+
+
 class Exp1Homologous:
     id = "EXP-1"
-    version = "v5-plots"
+    version = "v6-more-plots"
     datasets = ["S1", "S2", "S3", "S4", "S5"]
 
     def run(self, method, stage_data, embeddings, dataset_id, out):
@@ -67,7 +81,7 @@ class Exp1Homologous:
         mol_ids = [str(row.id) for row in df.itertuples(index=False)]
         positions = [int(row.position) for row in df.itertuples(index=False)]
 
-        # All pairs — used for M-MONO
+        # All pairs — used for M-MONO and mono_scatter plot
         rows = []
         for a, b in combinations(df.itertuples(index=False), 2):
             d = method.distance(embeddings[str(a.id)], embeddings[str(b.id)])
@@ -85,13 +99,16 @@ class Exp1Homologous:
 
         rho, p = spearmanr(pairs["gap"], pairs["distance"])
 
-        # Consecutive distances d(k, k+1) — used for M-SMOOTH
+        # Consecutive distances d(k, k+1) — used for M-SMOOTH and consecutive plot
         consec = [
             method.distance(embeddings[mol_ids[i]], embeddings[mol_ids[i + 1]])
             for i in range(len(mol_ids) - 1)
         ]
+        pd.DataFrame({"k": positions[:-1], "distance": consec}).to_csv(
+            out / "consecutive.csv", index=False
+        )
 
-        # Distances from first molecule d(mol_1, mol_k) — saved for plotting
+        # Distances from first molecule d(mol_1, mol_k) — used for M-LIN and from_first plot
         from_first = [
             method.distance(embeddings[mol_ids[0]], embeddings[mol_ids[k]])
             for k in range(1, len(mol_ids))
@@ -120,30 +137,33 @@ class Exp1Homologous:
     def make_plots(self, exp_results_dir: Path, method_ids: list[str]) -> None:
         plots_dir = exp_results_dir / "plots"
         plots_dir.mkdir(parents=True, exist_ok=True)
-        out = plots_dir / "distance_from_first.png"
 
-        # Staleness: any from_first.csv newer than the plot
-        input_hashes = {}
+        # Collect input hashes across all (method, dataset) result files
+        input_hashes: dict[str, str] = {}
         for m_id in method_ids:
             for ds_id in self.datasets:
-                p = result_dir(self.id, m_id, ds_id) / "from_first.csv"
-                if p.exists():
-                    input_hashes[f"{m_id}/{ds_id}"] = hash_file(p)
+                for fname in ("from_first.csv", "pairs.csv", "consecutive.csv"):
+                    p = result_dir(self.id, m_id, ds_id) / fname
+                    if p.exists():
+                        input_hashes[f"{m_id}/{ds_id}/{fname}"] = hash_file(p)
 
         if not input_hashes:
             return
 
-        if not is_stale(out, self.version, input_hashes):
+        # Use distance_from_first as the sentinel for all three plots
+        sentinel = plots_dir / "distance_from_first.png"
+        if not is_stale(sentinel, self.version, input_hashes):
             print(f"  [{self.id}] plots fresh")
             return
 
         print(f"  [{self.id}] generating plots...")
-        n = len(self.datasets)
-        ncols = 3
-        nrows = (n + ncols - 1) // ncols
-        fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows), sharey=False)
-        axes_flat = axes.flatten() if n > 1 else [axes]
+        self._plot_distance_from_first(plots_dir, method_ids)
+        self._plot_mono_scatter(plots_dir, method_ids)
+        self._plot_consecutive_distances(plots_dir, method_ids)
+        write_manifest(sentinel, version=self.version, inputs=input_hashes, compute_time=0.0)
 
+    def _plot_distance_from_first(self, plots_dir: Path, method_ids: list[str]) -> None:
+        fig, axes_flat = _make_grid(len(self.datasets))
         for ax_idx, ds_id in enumerate(self.datasets):
             ax = axes_flat[ax_idx]
             for m_id in method_ids:
@@ -157,14 +177,50 @@ class Exp1Homologous:
             ax.set_ylabel("d(mol₁, molₖ)")
             ax.legend(fontsize=8)
             ax.grid(True, alpha=0.3)
-
-        # Hide unused subplots
-        for ax_idx in range(len(self.datasets), len(axes_flat)):
-            axes_flat[ax_idx].set_visible(False)
-
+        _hide_unused(axes_flat, len(self.datasets))
         fig.suptitle("EXP-1: Distance from first molecule in homologous series", y=1.01)
         fig.tight_layout()
-        fig.savefig(out, dpi=150, bbox_inches="tight")
+        fig.savefig(plots_dir / "distance_from_first.png", dpi=150, bbox_inches="tight")
         plt.close(fig)
 
-        write_manifest(out, version=self.version, inputs=input_hashes, compute_time=0.0)
+    def _plot_mono_scatter(self, plots_dir: Path, method_ids: list[str]) -> None:
+        fig, axes_flat = _make_grid(len(self.datasets))
+        for ax_idx, ds_id in enumerate(self.datasets):
+            ax = axes_flat[ax_idx]
+            for m_id in method_ids:
+                csv = result_dir(self.id, m_id, ds_id) / "pairs.csv"
+                if not csv.exists():
+                    continue
+                df = pd.read_csv(csv)
+                ax.scatter(df["gap"], df["distance"], s=10, alpha=0.5, label=m_id)
+            ax.set_title(SERIES_LABELS.get(ds_id, ds_id))
+            ax.set_xlabel("|i − j|")
+            ax.set_ylabel("d(molᵢ, molⱼ)")
+            ax.legend(fontsize=8)
+            ax.grid(True, alpha=0.3)
+        _hide_unused(axes_flat, len(self.datasets))
+        fig.suptitle("EXP-1: All-pairs distance vs chain-length gap (M-MONO)", y=1.01)
+        fig.tight_layout()
+        fig.savefig(plots_dir / "mono_scatter.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+    def _plot_consecutive_distances(self, plots_dir: Path, method_ids: list[str]) -> None:
+        fig, axes_flat = _make_grid(len(self.datasets))
+        for ax_idx, ds_id in enumerate(self.datasets):
+            ax = axes_flat[ax_idx]
+            for m_id in method_ids:
+                csv = result_dir(self.id, m_id, ds_id) / "consecutive.csv"
+                if not csv.exists():
+                    continue
+                df = pd.read_csv(csv)
+                ax.plot(df["k"], df["distance"], marker="o", markersize=4, label=m_id)
+            ax.set_title(SERIES_LABELS.get(ds_id, ds_id))
+            ax.set_xlabel("Chain length k")
+            ax.set_ylabel("d(molₖ, molₖ₊₁)")
+            ax.legend(fontsize=8)
+            ax.grid(True, alpha=0.3)
+        _hide_unused(axes_flat, len(self.datasets))
+        fig.suptitle("EXP-1: Consecutive step distances (M-SMOOTH)", y=1.01)
+        fig.tight_layout()
+        fig.savefig(plots_dir / "consecutive_distances.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)

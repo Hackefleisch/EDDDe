@@ -1,13 +1,6 @@
 # custom 
-data/SMRT/*
-!data/SMRT/SMART_dataset_enn_short.csv
-data/welQrate/*/*
-!data/welQrate/*/*enn.csv
-outputs/
-mlruns/
-*.npy
-data/conformers/*
-data/rotated/*
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

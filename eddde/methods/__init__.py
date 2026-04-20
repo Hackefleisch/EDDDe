@@ -5,6 +5,7 @@ from .base import Method
 from .baselines.ecfp import ECFP4, ECFP6, FCFP4
 from .baselines.maccs import MACCSKeys
 from .baselines.atom_pair import AtomPair
+from .baselines.topological_torsion import TopologicalTorsion
 
 
 METHODS: dict[str, Method] = {}
@@ -21,3 +22,4 @@ _register(ECFP6())
 _register(FCFP4())
 _register(MACCSKeys())
 _register(AtomPair())
+_register(TopologicalTorsion())

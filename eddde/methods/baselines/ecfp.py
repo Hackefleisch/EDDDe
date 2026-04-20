@@ -1,6 +1,7 @@
 """B1: ECFP4 (Morgan radius 2, 2048 bits)
    B2: ECFP6 (Morgan radius 3, 2048 bits)
-Both use Tanimoto distance."""
+   B3: FCFP4 (feature-based Morgan radius 2, 2048 bits)
+All use Tanimoto distance."""
 from __future__ import annotations
 
 from typing import Any
@@ -46,3 +47,15 @@ class ECFP6(_MorganFP):
 
     def __init__(self) -> None:
         super().__init__(radius=3)
+
+
+class FCFP4(_MorganFP):
+    id = "B3"
+    version = "morgan-feat-r2-2048-v1"
+
+    def __init__(self) -> None:
+        atom_inv = rdFingerprintGenerator.GetMorganFeatureAtomInvGen()
+        self._gen = rdFingerprintGenerator.GetMorganGenerator(
+            radius=2, fpSize=2048, atomInvariantsGenerator=atom_inv
+        )
+        # skip super().__init__ — generator is set directly

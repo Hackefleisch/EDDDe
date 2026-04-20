@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .base import Method
-from .baselines.ecfp import ECFP4, ECFP6
+from .baselines.ecfp import ECFP4, ECFP6, FCFP4
 
 
 METHODS: dict[str, Method] = {}
@@ -16,3 +16,4 @@ def _register(m: Method) -> None:
 
 _register(ECFP4())
 _register(ECFP6())
+_register(FCFP4())

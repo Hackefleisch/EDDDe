@@ -6,6 +6,7 @@ from .baselines.ecfp import ECFP4, ECFP6, FCFP4
 from .baselines.maccs import MACCSKeys
 from .baselines.atom_pair import AtomPair
 from .baselines.topological_torsion import TopologicalTorsion
+from .baselines.rdkit_descriptors import RDKitDescriptors
 
 
 METHODS: dict[str, Method] = {}
@@ -23,3 +24,4 @@ _register(FCFP4())
 _register(MACCSKeys())
 _register(AtomPair())
 _register(TopologicalTorsion())
+_register(RDKitDescriptors())

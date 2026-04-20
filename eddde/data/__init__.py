@@ -5,6 +5,7 @@ from .base import Dataset
 from .sources.alkanes import Alkanes
 from .sources.alkanols import Alkanols
 from .sources.alkanoic_acids import AlkanoicAcids
+from .sources.alkylamines import Alkylamines
 
 
 DATASETS: dict[str, Dataset] = {}
@@ -19,3 +20,4 @@ def _register(ds: Dataset) -> None:
 _register(Alkanes())
 _register(Alkanols())
 _register(AlkanoicAcids())
+_register(Alkylamines())

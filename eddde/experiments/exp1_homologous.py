@@ -43,7 +43,7 @@ def _m_lin(positions: list[int], distances_from_first: list[float]) -> tuple[flo
 class Exp1Homologous:
     id = "EXP-1"
     version = "v4-mlin-pvalue"
-    datasets = ["S1", "S2", "S3"]
+    datasets = ["S1", "S2", "S3", "S4"]
 
     def run(self, method, stage_data, embeddings, dataset_id, out):
         df: pd.DataFrame = (

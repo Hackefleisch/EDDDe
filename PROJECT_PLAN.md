@@ -133,9 +133,15 @@ All experiments produce MUT results and corresponding results for every applicab
   - S6: monosubstituted benzenes (**11**, Br dropped), substituents: -H, -CH₃, -OH, -NH₂, -F, -Cl, -NO₂, -COOH, -CHO, -COCH₃, -OCH₃
   - S7: monosubstituted cyclohexanes (10), same substituent set minus -Br and -NO₂
   - S8: para-substituted benzoic acids (Hammett series, **9**, Br dropped), X ∈ {-NH₂, -OCH₃, -CH₃, -H, -F, -Cl, -CF₃, -CN, -NO₂}. Each compound has a known Hammett σ_para value tabulated in the dataset.
-- **Metrics**: M-HAMMETT (on S8), M-SILHOUETTE (on S6 and S7, donor/acceptor/neutral labels). ~~M-HALO-ORDER~~ dropped — requires Br, which is outside ElektroNN's supported element set.
-- **Expected behavior**: MUT shows strong M-HAMMETT correlation because σ values reflect electronic effects. B1–B6 perform poorly on M-HAMMETT because they encode connectivity, not electronics. B15–B17 also expected to perform well.
-- **Success criterion**: MUT achieves Spearman ρ ≥ 0.8 with Hammett σ on S8, significantly higher than all B1–B6 (p < 0.01 via permutation test).
+- **Metrics**:
+  - M-HAMMETT-PAIR (S8) — primary. Spearman ρ between |σᵢ − σⱼ| and d(Xᵢ, Xⱼ) over all pairs. Symmetric in both sides so a U-shape around H (chemically correct) doesn't get penalised. 36 pairs for n=9 compounds.
+  - M-HAMMETT-ABS (S8) — secondary. Spearman ρ between |σ_para| and d(X, H-compound). Sanity check; n=9.
+  - M-SILHOUETTE-S6 (S6) — silhouette of 2D MDS using donor/acceptor/neutral labels. Conjugated scaffold; higher is better.
+  - M-SILHOUETTE-S7 (S7) — same score on aliphatic cyclohexane control. Electronic effects shouldn't propagate on sp³ scaffolds, so **lower is better** here — this is the conjugation-specificity control and must not be averaged with S6.
+  - ~~M-HAMMETT~~ (signed σ vs d(X, H)) dropped: σ is signed, distance is unsigned, so a correct U-shape scores low. Replaced by M-HAMMETT-PAIR.
+  - ~~M-HALO-ORDER~~ dropped — requires Br, which is outside ElektroNN's supported element set.
+- **Expected behavior**: MUT shows strong M-HAMMETT-PAIR correlation because σ values reflect electronic effects. B1–B6 perform poorly because they encode connectivity, not electronics. B15–B17 also expected to perform well. M-SILHOUETTE-S6 should exceed M-SILHOUETTE-S7 for MUTs that are genuinely conjugation-sensitive.
+- **Success criterion**: MUT achieves Spearman ρ ≥ 0.7 on M-HAMMETT-PAIR, significantly higher than all B1–B6 (p < 0.01 via permutation test). Threshold relaxed from the old ≥ 0.8 because the pair metric operates on 36 noisier data points.
 
 ### 5.3 EXP-3a: WelQrate Retrieval
 
@@ -233,8 +239,11 @@ Any metric referenced by ID in §5 is defined here.
 | M-MONO | Monotonicity score | Spearman ρ between chain-length difference \|i−j\| and d(mol_i, mol_j), over all pairs within a series. Range [-1, 1]; 1 = perfect. |
 | M-SMOOTH | Smoothness score | Standard deviation of consecutive-distance ratios d(k, k+1) / d(k-1, k) across a series. Lower is smoother. |
 | M-LIN | Linearity R² | Linear regression of d(mol_1, mol_k) vs. k. |
-| M-HAMMETT | Hammett correlation | Spearman ρ between Hammett σ_para and d(X-compound, H-compound) on S8. |
-| M-SILHOUETTE | Donor/acceptor clustering | Silhouette score of 2D MDS projection of S6 distance matrix, using donor/acceptor/neutral labels. |
+| M-HAMMETT-PAIR | Hammett pair correlation (primary) | Spearman ρ between \|σᵢ − σⱼ\| and d(Xᵢ, Xⱼ) over all C(n,2) pairs in S8. Higher = better. |
+| M-HAMMETT-ABS | Hammett magnitude correlation (secondary) | Spearman ρ between \|σ_para\| and d(X, H-compound) on S8. Higher = better. |
+| M-SILHOUETTE-S6 | Donor/acceptor clustering on conjugated scaffold | Silhouette score of 2D MDS projection of S6 distance matrix, using donor/acceptor/neutral labels. Higher = better. |
+| M-SILHOUETTE-S7 | Donor/acceptor clustering on aliphatic control | Same score on S7 (cyclohexane). **Lower = better** — aliphatic scaffolds shouldn't cluster by electronic class. Do not average with S6. |
+| ~~M-HAMMETT~~ | ~~Signed σ vs d(X, H)~~ | *Dropped: σ is signed and distance is unsigned, so a chemically-correct U-shape scores poorly. Replaced by M-HAMMETT-PAIR.* |
 | ~~M-HALO-ORDER~~ | ~~Halogen ordering correctness~~ | *Dropped: Br is outside ElektroNN's supported basis set (see CLAUDE.md §"SMILES-stage element filter").* |
 
 ### 6.2 Retrieval Metrics
@@ -300,7 +309,7 @@ Each experiment must produce the following, saved to `results/EXP-X/`:
 
 MUT is considered an improvement if **at least three** of the following are met:
 
-1. **Electronic sensitivity (EXP-2)**: Significantly better M-HAMMETT than all topological FPs (p < 0.01).
+1. **Electronic sensitivity (EXP-2)**: Significantly better M-HAMMETT-PAIR than all topological FPs (p < 0.01).
 2. **Bioisostere recognition (EXP-5)**: Top-2 among all methods on M-BIO-AUC.
 3. **Scaffold hopping (EXP-6)**: Significantly higher M-SCAFRATIO than ECFP4 (p < 0.05).
 4. **Retrieval on curated data (EXP-3a & 3b)**: Non-inferior on WelQrate vs best FP baseline AND superior on MUV (p < 0.05).

@@ -131,7 +131,10 @@ def _write_summary_md(method_ids: list[str]) -> None:
             continue
 
         metrics = list(exp.metric_direction.keys())
-        n_datasets = len(exp.datasets)
+        # Experiments may declare which datasets each metric applies to (e.g. EXP-2's
+        # M-HAMMETT-PAIR only on S8). Fall back to all datasets for experiments that
+        # don't declare — that's the EXP-1 case where every metric applies to every series.
+        metric_datasets = getattr(exp, "metric_datasets", None) or {m: exp.datasets for m in metrics}
 
         # --- Per-metric stats: mean ± SE and coverage ---
         stat_rows: dict[str, dict[str, str]] = {m: {} for m in method_ids}
@@ -139,6 +142,7 @@ def _write_summary_md(method_ids: list[str]) -> None:
 
         for metric in metrics:
             direction = exp.metric_direction[metric]
+            n_applicable = len(metric_datasets.get(metric, exp.datasets))
             sub = df[df["metric"] == metric]
 
             method_vals: dict[str, list[float]] = {}
@@ -146,18 +150,25 @@ def _write_summary_md(method_ids: list[str]) -> None:
                 vals = sub[sub["method"] == m_id]["value"].dropna().tolist()
                 method_vals[m_id] = vals
 
-            # Mean ± SE with coverage
+            # Mean ± SE with coverage. If the metric only applies to one dataset,
+            # skip the (n/n) annotation entirely — it's always "(1/1)" by design
+            # and adds no information.
             for m_id in method_ids:
                 vals = method_vals[m_id]
                 n = len(vals)
-                if n == 0:
-                    stat_rows[m_id][metric] = f"— (0/{n_datasets})"
+                if n_applicable <= 1:
+                    if n == 0:
+                        stat_rows[m_id][metric] = "—"
+                    else:
+                        stat_rows[m_id][metric] = f"{vals[0]:.3f}"
+                elif n == 0:
+                    stat_rows[m_id][metric] = f"— (0/{n_applicable})"
                 elif n == 1:
-                    stat_rows[m_id][metric] = f"{vals[0]:.3f} (1/{n_datasets})"
+                    stat_rows[m_id][metric] = f"{vals[0]:.3f} (1/{n_applicable})"
                 else:
                     mean = float(np.mean(vals))
                     se = float(np.std(vals, ddof=1) / np.sqrt(n))
-                    stat_rows[m_id][metric] = f"{mean:.3f}±{se:.3f} ({n}/{n_datasets})"
+                    stat_rows[m_id][metric] = f"{mean:.3f}±{se:.3f} ({n}/{n_applicable})"
 
             # Rank (lower rank = better). Null → worst rank = n_methods + 1
             mean_vals: list[tuple[str, float | None]] = []

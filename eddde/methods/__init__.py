@@ -7,6 +7,7 @@ from .baselines.maccs import MACCSKeys
 from .baselines.atom_pair import AtomPair
 from .baselines.topological_torsion import TopologicalTorsion
 from .baselines.rdkit_descriptors import RDKitDescriptors
+from .muts.mean import MutMean
 
 
 METHODS: dict[str, Method] = {}
@@ -25,3 +26,4 @@ _register(MACCSKeys())
 _register(AtomPair())
 _register(TopologicalTorsion())
 _register(RDKitDescriptors())
+_register(MutMean())

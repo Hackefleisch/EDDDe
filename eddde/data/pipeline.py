@@ -8,6 +8,8 @@ the chain cascades to rebuild every downstream stage.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from ..cache import (
     Manifest,
     hash_file,
@@ -19,10 +21,43 @@ from ..cache import (
 from . import conformers, elektronn_runner
 from .base import STAGE_ORDER, Dataset, Stage, dataset_size, stage_path
 
+# Bump to invalidate every cached SMILES CSV project-wide (cascades to downstream stages).
+SMILES_FILTER_VERSION = "v1-elektronn-elements"
+
+
+def _filter_unsupported_atoms(csv: Path, ds_id: str) -> None:
+    """Drop rows whose SMILES contains atoms outside ElektroNN's supported basis set.
+
+    Project-wide hard filter: ensures every method (SMILES-only baselines and
+    ElektroNN-based MUTs alike) sees the same molecule set. See CLAUDE.md.
+    """
+    import pandas as pd
+    from rdkit import Chem
+
+    supported = elektronn_runner.supported_elements()
+    df = pd.read_csv(csv)
+    keep = []
+    dropped: list[str] = []
+    for row in df.itertuples(index=False):
+        mol = Chem.MolFromSmiles(row.smiles)
+        if mol is None:
+            keep.append(False)
+            dropped.append(str(row.id))
+            continue
+        mol_h = Chem.AddHs(mol)
+        ok = all(a.GetAtomicNum() in supported for a in mol_h.GetAtoms())
+        keep.append(ok)
+        if not ok:
+            dropped.append(str(row.id))
+    if dropped:
+        preview = ", ".join(dropped[:10]) + ("..." if len(dropped) > 10 else "")
+        print(f"  [{ds_id}:smiles] dropped {len(dropped)} molecule(s) with unsupported atoms: {preview}")
+    df[keep].to_csv(csv, index=False)
+
 
 def _stage_version(ds: Dataset, stage: Stage) -> str:
     if stage == Stage.SMILES:
-        return ds.version
+        return f"{ds.version}+{SMILES_FILTER_VERSION}"
     if stage == Stage.CONFORMERS:
         return ds.version if ds.has_native_conformers else conformers.VERSION
     if stage == Stage.ELEKTRONN_COEFFS:
@@ -56,6 +91,7 @@ def _build_stage(ds: Dataset, stage: Stage) -> None:
     with timed() as t:
         if stage == Stage.SMILES:
             ds.build_smiles(out)
+            _filter_unsupported_atoms(out, ds.id)
         elif stage == Stage.CONFORMERS:
             smiles = stage_path(ds.id, Stage.SMILES)
             if ds.has_native_conformers:

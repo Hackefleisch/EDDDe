@@ -142,7 +142,7 @@ Cyclohexane with substituents: -H, -CH₃, -OH, -NH₂, -F, -Cl, -COOH, -CHO, -C
 
 - **Chemical clustering:** In the MDS plot of Set A, do electron-donating groups (OH, NH₂, OCH₃) cluster separately from electron-withdrawing groups (NO₂, COOH, CHO)? Evaluate by silhouette score after labeling compounds as donors/acceptors/neutral.
 - **Hammett correlation (Set C only):** Spearman ρ between σ_para and d(X, H) across all methods. A high ρ indicates the similarity metric tracks electronic effects.
-- **Halogen ordering:** Within the halogen substituents (F, Cl, Br), verify that d(F,Cl) < d(F,Br) for methods that capture polarizability/electronegativity trends.
+- ~~**Halogen ordering:** Within the halogen substituents (F, Cl, Br), verify that d(F,Cl) < d(F,Br) for methods that capture polarizability/electronegativity trends.~~ *Dropped — Br is outside ElektroNN's supported basis set (H, C, N, O, F, S, Cl), so the project-wide SMILES filter removes all Br-containing molecules. See CLAUDE.md §"SMILES-stage element filter".*
 
 **Expected outcomes:** Topological fingerprints (ECFP, MACCS) will largely fail the Hammett correlation test because they encode connectivity, not electronic effects. ROCS/USR will partially capture the effect through shape differences. The electron density method should show the strongest Hammett correlation because σ values are themselves derived from electronic effects. QM baselines (Coulomb matrix, SOAP) should also perform well. Mol2vec may capture some trends from statistical co-occurrence but without physical grounding.
 

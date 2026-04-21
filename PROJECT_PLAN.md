@@ -129,11 +129,11 @@ All experiments produce MUT results and corresponding results for every applicab
 
 - **Type**: internal
 - **Question**: Does the embedding reflect electronic effects of substituents?
-- **Molecule sets**:
-  - S6: monosubstituted benzenes (12), substituents: -H, -CH₃, -OH, -NH₂, -F, -Cl, -Br, -NO₂, -COOH, -CHO, -COCH₃, -OCH₃
+- **Molecule sets** (effective set after the project-wide ElektroNN element filter — see CLAUDE.md):
+  - S6: monosubstituted benzenes (**11**, Br dropped), substituents: -H, -CH₃, -OH, -NH₂, -F, -Cl, -NO₂, -COOH, -CHO, -COCH₃, -OCH₃
   - S7: monosubstituted cyclohexanes (10), same substituent set minus -Br and -NO₂
-  - S8: para-substituted benzoic acids (Hammett series, 10), X ∈ {-NH₂, -OCH₃, -CH₃, -H, -F, -Cl, -Br, -CF₃, -CN, -NO₂}. Each compound has a known Hammett σ_para value (to be tabulated in the dataset).
-- **Metrics**: M-HAMMETT (on S8), M-SILHOUETTE (on S6, donor/acceptor/neutral labels), M-HALO-ORDER (within S6)
+  - S8: para-substituted benzoic acids (Hammett series, **9**, Br dropped), X ∈ {-NH₂, -OCH₃, -CH₃, -H, -F, -Cl, -CF₃, -CN, -NO₂}. Each compound has a known Hammett σ_para value tabulated in the dataset.
+- **Metrics**: M-HAMMETT (on S8), M-SILHOUETTE (on S6 and S7, donor/acceptor/neutral labels). ~~M-HALO-ORDER~~ dropped — requires Br, which is outside ElektroNN's supported element set.
 - **Expected behavior**: MUT shows strong M-HAMMETT correlation because σ values reflect electronic effects. B1–B6 perform poorly on M-HAMMETT because they encode connectivity, not electronics. B15–B17 also expected to perform well.
 - **Success criterion**: MUT achieves Spearman ρ ≥ 0.8 with Hammett σ on S8, significantly higher than all B1–B6 (p < 0.01 via permutation test).
 
@@ -235,7 +235,7 @@ Any metric referenced by ID in §5 is defined here.
 | M-LIN | Linearity R² | Linear regression of d(mol_1, mol_k) vs. k. |
 | M-HAMMETT | Hammett correlation | Spearman ρ between Hammett σ_para and d(X-compound, H-compound) on S8. |
 | M-SILHOUETTE | Donor/acceptor clustering | Silhouette score of 2D MDS projection of S6 distance matrix, using donor/acceptor/neutral labels. |
-| M-HALO-ORDER | Halogen ordering correctness | Binary: is d(F,Cl) < d(F,Br)? |
+| ~~M-HALO-ORDER~~ | ~~Halogen ordering correctness~~ | *Dropped: Br is outside ElektroNN's supported basis set (see CLAUDE.md §"SMILES-stage element filter").* |
 
 ### 6.2 Retrieval Metrics
 

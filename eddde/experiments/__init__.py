@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .base import Experiment
 from .exp1_homologous import Exp1Homologous
+from .exp2_functional_group import Exp2FunctionalGroup
 
 
 EXPERIMENTS: dict[str, Experiment] = {}
@@ -15,3 +16,4 @@ def _register(e: Experiment) -> None:
 
 
 _register(Exp1Homologous())
+_register(Exp2FunctionalGroup())

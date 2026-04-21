@@ -7,6 +7,9 @@ from .sources.alkanols import Alkanols
 from .sources.alkanoic_acids import AlkanoicAcids
 from .sources.alkylamines import Alkylamines
 from .sources.peg import PEG
+from .sources.subst_benzenes import SubstBenzenes
+from .sources.subst_cyclohexanes import SubstCyclohexanes
+from .sources.hammett_series import HammettSeries
 
 
 DATASETS: dict[str, Dataset] = {}
@@ -23,3 +26,6 @@ _register(Alkanols())
 _register(AlkanoicAcids())
 _register(Alkylamines())
 _register(PEG())
+_register(SubstBenzenes())
+_register(SubstCyclohexanes())
+_register(HammettSeries())

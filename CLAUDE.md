@@ -101,6 +101,12 @@ results/EXP-X/{method_id}/{dataset_id}/metrics.json
 
 **Atom-index alignment.** Row `i` of `coefficients[mol_id]` corresponds to atom `i` of `conformers[mol_id].GetAtomWithIdx(i)`, and `adjacencies[mol_id][i, :]` / `distances[mol_id][i, :]` use the same indexing. Hydrogens are included (from `Chem.AddHs`), so `n_atoms` counts them — filter by `atom.GetAtomicNum() != 1` if a method wants heavy-atom-only. Positions and bond types are **not** duplicated into the coefficient bundle; a method that needs them should declare `needs = Stage.ELEKTRONN_COEFFS` and read them from `stage_data[Stage.CONFORMERS][mol_id]` via `mol.GetConformer().GetAtomPosition(i)` and `mol.GetAtomWithIdx(i).GetBonds()`.
 
+**SMILES-stage element filter.** The SMILES stage applies a project-wide hard filter: any molecule containing an element outside ElektroNN's supported basis set — currently **{H, C, N, O, F, S, Cl}** (atomic numbers {1, 6, 7, 8, 9, 16, 17}, queried live from `MoleculeDataset({}).basisfunction_params`) — is dropped before any downstream stage runs. Every method, including SMILES-only baselines, sees the same filtered set; this keeps comparisons fair and prevents the `KeyError` that occurs when an ElektroNN-based method silently skips a molecule while a baseline keeps it. Consequences:
+- Datasets lose any molecule with Br, I, P, B, Si, etc. (e.g. S6 drops bromobenzene, S8 drops 4-bromobenzoic acid). Log lines like `[S6:smiles] dropped 1 molecule(s) with unsupported atoms: s6_Br` appear at build time.
+- **M-HALO-ORDER is dropped from EXP-2** (defined on F/Cl/Br; only F and Cl remain).
+- When adding large real-world datasets (D3–D9) the drop rate may be non-trivial; revisit whether the filter should become per-dataset-opt-out before those experiments land.
+- The filter lives in [eddde/data/pipeline.py](eddde/data/pipeline.py) (`_filter_unsupported_atoms`); bump `SMILES_FILTER_VERSION` there to invalidate all cached SMILES CSVs when the supported set changes.
+
 ## Conventions
 
 - Distance convention: smaller = more similar. For similarity-based methods (Tanimoto, ROCS), convert as `distance = 1 - similarity`.

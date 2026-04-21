@@ -37,6 +37,17 @@ BATCH_SIZE = 128
 NUM_WORKERS = 0
 
 _MODEL_CACHE: dict[str, Any] = {}
+_SUPPORTED_ELEMENTS: frozenset[int] | None = None
+
+
+def supported_elements() -> frozenset[int]:
+    """Atomic numbers ElektroNN has basis functions for. Used by the SMILES-stage
+    filter to drop molecules that can't be embedded — see pipeline._build_stage."""
+    global _SUPPORTED_ELEMENTS
+    if _SUPPORTED_ELEMENTS is None:
+        from elektronn.dataset import MoleculeDataset
+        _SUPPORTED_ELEMENTS = frozenset(int(z) for z in MoleculeDataset({}).basisfunction_params.keys())
+    return _SUPPORTED_ELEMENTS
 
 
 def _get_model():

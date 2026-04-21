@@ -18,18 +18,45 @@ Output: pickled dict with three sub-dicts:
 
 Molecules containing atoms outside ElektroNN's supported basis-function set
 are dropped with a warning; their ids will be missing from all three sub-dicts.
+
+Model weights are loaded once per process via a module-level cache; call
+`prewarm()` before any `timed()` pipeline stage to keep the ~12s weight-load
+cost out of per-dataset `compute_time` measurements.
 """
 from __future__ import annotations
 
 import pickle
 import tempfile
 from pathlib import Path
+from typing import Any
 
 
-VERSION = "elektronn-ensemble+graph-v1"
+VERSION = "elektronn-ensemble+graph-v2"
 
 BATCH_SIZE = 128
 NUM_WORKERS = 0
+
+_MODEL_CACHE: dict[str, Any] = {}
+
+
+def _get_model():
+    """Return (model, device). Loads + caches on first call; cheap thereafter."""
+    if "model" not in _MODEL_CACHE:
+        import torch
+        from elektronn.model import ElektroNN
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = ElektroNN()
+        model.eval()
+        model.to(device)
+        _MODEL_CACHE["model"] = model
+        _MODEL_CACHE["device"] = device
+    return _MODEL_CACHE["model"], _MODEL_CACHE["device"]
+
+
+def prewarm() -> None:
+    """Load ElektroNN weights once. Safe to call multiple times. Call before
+    any timed pipeline stage so weight-load cost isn't billed per dataset."""
+    _get_model()
 
 
 def generate(conformers_pkl: Path, out: Path) -> None:
@@ -40,7 +67,6 @@ def generate(conformers_pkl: Path, out: Path) -> None:
     from torch_geometric.utils import unbatch
 
     from elektronn.dataset import MoleculeDataset
-    from elektronn.model import ElektroNN
 
     with open(conformers_pkl, "rb") as f:
         mols: dict[str, Chem.Mol] = pickle.load(f)
@@ -59,10 +85,7 @@ def generate(conformers_pkl: Path, out: Path) -> None:
         preview = ", ".join(sorted(skipped)[:10]) + ("..." if len(skipped) > 10 else "")
         print(f"  [elektronn] skipped {len(skipped)} molecule(s) with unsupported atoms: {preview}")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = ElektroNN()
-    model.eval()
-    model.to(device)
+    model, device = _get_model()
 
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS)
 

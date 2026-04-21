@@ -50,6 +50,8 @@ class Manifest:
     compute_time: float
     upstream_compute_time: float = 0.0
     timestamp: float = 0.0
+    dataset_size: int = 0
+    compute_time_per_mol: float = 0.0
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, sort_keys=True)
@@ -62,6 +64,9 @@ class Manifest:
 
     def chain_time(self) -> float:
         return self.compute_time + self.upstream_compute_time
+
+    def chain_time_per_mol(self) -> float:
+        return self.chain_time() / self.dataset_size if self.dataset_size else 0.0
 
 
 def manifest_path(artifact: Path) -> Path:
@@ -86,8 +91,10 @@ def write_manifest(
     version: str,
     inputs: dict,
     compute_time: float,
+    dataset_size: int,
     upstream_compute_time: float = 0.0,
 ) -> Manifest:
+    per_mol = compute_time / dataset_size if dataset_size else 0.0
     m = Manifest(
         version=version,
         inputs=inputs,
@@ -95,6 +102,8 @@ def write_manifest(
         compute_time=compute_time,
         upstream_compute_time=upstream_compute_time,
         timestamp=time.time(),
+        dataset_size=dataset_size,
+        compute_time_per_mol=per_mol,
     )
     manifest_path(artifact).write_text(m.to_json())
     return m

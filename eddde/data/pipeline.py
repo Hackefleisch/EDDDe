@@ -17,7 +17,7 @@ from ..cache import (
     write_manifest,
 )
 from . import conformers, elektronn_runner
-from .base import STAGE_ORDER, Dataset, Stage, stage_path
+from .base import STAGE_ORDER, Dataset, Stage, dataset_size, stage_path
 
 
 def _stage_version(ds: Dataset, stage: Stage) -> str:
@@ -73,6 +73,7 @@ def _build_stage(ds: Dataset, stage: Stage) -> None:
         inputs=_stage_inputs(ds, stage),
         compute_time=t["seconds"],
         upstream_compute_time=_upstream_chain_time(ds, stage),
+        dataset_size=dataset_size(ds.id),
     )
 
 

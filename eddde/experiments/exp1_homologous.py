@@ -160,7 +160,7 @@ class Exp1Homologous:
         self._plot_distance_from_first(plots_dir, method_ids)
         self._plot_mono_scatter(plots_dir, method_ids)
         self._plot_consecutive_distances(plots_dir, method_ids)
-        write_manifest(sentinel, version=self.version, inputs=input_hashes, compute_time=0.0)
+        write_manifest(sentinel, version=self.version, inputs=input_hashes, compute_time=0.0, dataset_size=0)
 
     # Direction: +1 = higher is better, -1 = lower is better
     metric_direction = {"M-MONO": 1, "M-SMOOTH": -1, "M-LIN": 1}

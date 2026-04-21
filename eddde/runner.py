@@ -30,7 +30,7 @@ from .cache import (
     write_manifest,
 )
 from .data import DATASETS
-from .data.base import STAGE_ORDER, Stage, stage_path
+from .data.base import STAGE_ORDER, Stage, dataset_size, stage_path
 from .data.pipeline import build_up_to
 from .experiments import EXPERIMENTS
 from .experiments.base import RESULTS_ROOT, result_dir
@@ -80,6 +80,7 @@ def _embed_if_stale(method, ds_id: str, stage_data: dict) -> Path:
         inputs=expected_inputs,
         compute_time=t["seconds"],
         upstream_compute_time=upstream,
+        dataset_size=dataset_size(ds_id),
     )
     return path
 
@@ -110,6 +111,7 @@ def _run_experiment_if_stale(exp, method, ds_id: str, stage_data: dict) -> None:
         inputs=expected_inputs,
         compute_time=t["seconds"],
         upstream_compute_time=upstream,
+        dataset_size=dataset_size(ds_id),
     )
 
 
@@ -118,6 +120,7 @@ def _write_summary_md(method_ids: list[str]) -> None:
     lines: list[str] = ["# EDDDe Benchmark Summary\n"]
 
     all_avg_ranks: dict[str, list[float]] = {m: [] for m in method_ids}
+    all_time_per_mol: dict[str, list[float]] = {m: [] for m in method_ids}
 
     for exp_id, exp in EXPERIMENTS.items():
         if not hasattr(exp, "collect_results") or not hasattr(exp, "metric_direction"):
@@ -186,9 +189,20 @@ def _write_summary_md(method_ids: list[str]) -> None:
 
         sorted_methods = sorted(method_ids, key=lambda m: exp_avg_rank.get(m, float("nan")))
 
+        # --- Per-method end-to-end time per molecule (chain time of the
+        # experiment manifest, averaged across this experiment's datasets). ---
+        time_per_mol: dict[str, list[float]] = {m: [] for m in method_ids}
+        for m_id in method_ids:
+            for ds_id in exp.datasets:
+                marker = result_dir(exp_id, m_id, ds_id) / "metrics.json"
+                em = Manifest.load(manifest_path(marker))
+                if em and em.dataset_size:
+                    time_per_mol[m_id].append(em.chain_time_per_mol())
+            all_time_per_mol[m_id].extend(time_per_mol[m_id])
+
         # Build markdown table
         lines.append(f"\n## {exp_id}\n")
-        header_cols = ["Method"] + [f"{m}" for m in metrics] + ["Avg rank"]
+        header_cols = ["Method"] + [f"{m}" for m in metrics] + ["Avg rank", "s/mol"]
         lines.append("| " + " | ".join(header_cols) + " |")
         lines.append("| " + " | ".join(["---"] * len(header_cols)) + " |")
 
@@ -196,16 +210,18 @@ def _write_summary_md(method_ids: list[str]) -> None:
             metric_cells = [stat_rows[m_id].get(m, "—") for m in metrics]
             avg_r = exp_avg_rank[m_id]
             avg_str = f"{avg_r:.2f}" if not np.isnan(avg_r) else "—"
-            lines.append("| " + " | ".join([m_id] + metric_cells + [avg_str]) + " |")
+            times = time_per_mol[m_id]
+            time_str = f"{float(np.mean(times)):.3g}" if times else "—"
+            lines.append("| " + " | ".join([m_id] + metric_cells + [avg_str, time_str]) + " |")
 
         dir_str = ", ".join(f"{m}({'up' if d > 0 else 'down'})" for m, d in exp.metric_direction.items())
-        lines.append(f"\n*Directions: {dir_str}*\n")
+        lines.append(f"\n*Directions: {dir_str}. s/mol: end-to-end chain time divided by dataset size, averaged across datasets.*\n")
 
     # --- Cross-experiment aggregate ---
     if any(v for v in all_avg_ranks.values()):
         lines.append("\n## Cross-experiment average rank\n")
-        lines.append("| Method | Avg rank (all experiments) |")
-        lines.append("| --- | --- |")
+        lines.append("| Method | Avg rank (all experiments) | s/mol |")
+        lines.append("| --- | --- | --- |")
         overall: list[tuple[str, float]] = []
         for m_id in method_ids:
             ranks = all_avg_ranks[m_id]
@@ -213,7 +229,9 @@ def _write_summary_md(method_ids: list[str]) -> None:
         overall.sort(key=lambda x: x[1])
         for m_id, avg in overall:
             avg_str = f"{avg:.2f}" if not np.isnan(avg) else "—"
-            lines.append(f"| {m_id} | {avg_str} |")
+            times = all_time_per_mol[m_id]
+            time_str = f"{float(np.mean(times)):.3g}" if times else "—"
+            lines.append(f"| {m_id} | {avg_str} | {time_str} |")
 
     RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
     (RESULTS_ROOT / "SUMMARY.md").write_text("\n".join(lines) + "\n")
@@ -222,6 +240,11 @@ def _write_summary_md(method_ids: list[str]) -> None:
 
 def main() -> None:
     max_stage = _max_needed_stage()
+
+    if STAGE_ORDER[max_stage] >= STAGE_ORDER[Stage.ELEKTRONN_COEFFS]:
+        from .data import elektronn_runner
+        print("Pre-loading ElektroNN weights (one-off, excluded from per-dataset timing)...")
+        elektronn_runner.prewarm()
 
     print("=== Dataset stages ===")
     for ds_id, ds in DATASETS.items():

@@ -34,6 +34,17 @@ def stage_path(ds_id: str, stage: Stage) -> Path:
     return dataset_dir(ds_id) / f"{stage.value}{STAGE_EXT[stage]}"
 
 
+def dataset_size(ds_id: str) -> int:
+    """Canonical molecule count for a dataset: number of rows in the SMILES
+    stage CSV. Used by manifests to record per-molecule compute cost."""
+    import pandas as pd
+
+    smiles = stage_path(ds_id, Stage.SMILES)
+    if not smiles.exists():
+        return 0
+    return len(pd.read_csv(smiles))
+
+
 class Dataset:
     """Base class for datasets. Subclasses override build_smiles and,
     if has_native_conformers is True, build_native_conformers."""

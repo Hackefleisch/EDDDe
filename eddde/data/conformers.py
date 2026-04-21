@@ -1,6 +1,9 @@
 """Default 3D conformer generation used for datasets without native conformers.
 
-Produces a pickled dict[mol_id -> rdkit.Chem.Mol with embedded conformers].
+Produces a pickled dict[mol_id -> rdkit.Chem.Mol] where each Mol has exactly
+one conformer: the lowest MMFF94 energy geometry found across N_CONFS sampled
+starting geometries. All 3D methods use this single conformer.
+
 When this module's VERSION changes, the conformer stage becomes stale for
 every dataset with has_native_conformers=False, cascading rebuilds downstream.
 """
@@ -14,10 +17,21 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 
 
-VERSION = "etkdgv3-mmff94-n50-prune0.5-v1"
-N_CONFS = 50
+VERSION = "etkdgv3-mmff94-n20-lowest-energy-v1"
+N_CONFS = 20
 PRUNE_RMS_THRESH = 0.5
 SEED = 0xEDDDE
+
+
+def _keep_lowest_energy_conformer(mol: Chem.Mol) -> Chem.Mol:
+    results = AllChem.MMFFOptimizeMoleculeConfs(mol)
+    # results is a list of (not_converged, energy) per conformer
+    best_idx = min(range(len(results)), key=lambda i: results[i][1])
+    best_conf = mol.GetConformer(best_idx)
+    new_mol = Chem.RWMol(mol)
+    new_mol.RemoveAllConformers()
+    new_mol.AddConformer(best_conf, assignId=True)
+    return new_mol.GetMol()
 
 
 def generate(smiles_csv: Path, out: Path) -> None:
@@ -33,8 +47,7 @@ def generate(smiles_csv: Path, out: Path) -> None:
             raise ValueError(f"unparseable SMILES for id={row['id']}: {row['smiles']!r}")
         mol = Chem.AddHs(mol)
         AllChem.EmbedMultipleConfs(mol, numConfs=N_CONFS, params=params)
-        AllChem.MMFFOptimizeMoleculeConfs(mol)
-        mols[str(row["id"])] = mol
+        mols[str(row["id"])] = _keep_lowest_energy_conformer(mol)
 
     with open(out, "wb") as f:
         pickle.dump(mols, f)

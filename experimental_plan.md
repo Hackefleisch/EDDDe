@@ -328,12 +328,13 @@ Report mean ± standard error across 5 random query selections per target.
 
 ### 6.1 Conformer Generation
 
-For all 3D methods (ROCS, USR, USRCAT, eSim, Coulomb matrix, SOAP, ACSF, and the electron density method itself), generate conformer ensembles consistently:
+For all 3D methods (ROCS, USR, USRCAT, eSim, Coulomb matrix, SOAP, ACSF, and the electron density method itself), use a single shared conformer per molecule:
 
-- Use RDKit ETKDG (ETKDGv3) with `numConfs=50`, `pruneRmsThresh=0.5`.
-- Energy-minimize with MMFF94 or UFF.
-- For USR/USRCAT: report the best similarity across all conformer pairs.
-- For your electron density method: specify whether you use a single lowest-energy conformer, an average over conformers, or an ensemble maximum. This choice must be held constant.
+- Generate 20 starting geometries with RDKit ETKDGv3, `pruneRmsThresh=0.5`.
+- Minimize all 20 with MMFF94, keep only the lowest-energy result.
+- Every method then operates on this single conformer — no per-method conformer selection logic.
+
+Rationale: a single minimum-energy conformer is the natural input for QM-derived representations (ElektroNN produces coefficients for a fixed geometry) and avoids inflated compute for methods that would otherwise iterate over an ensemble. If results suggest conformational flexibility matters, a best-of-ensemble follow-up can be added as a separate method variant for all 3D methods uniformly.
 
 ### 6.2 Software Stack
 

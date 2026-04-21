@@ -63,7 +63,7 @@ All baselines must be computed on the same molecule sets as MUT. When applicable
 
 **Rationale for QM-descriptor baselines:** Critical for isolating whether any MUT advantage stems from electron density specifically, vs. QM information in general.
 
-**Conformer handling:** All 3D methods (B8–B11, B13, B15–B17, and MUT) use identical conformer ensembles: RDKit ETKDGv3, `numConfs=50`, `pruneRmsThresh=0.5`, MMFF94-minimized. For methods that reduce over conformers, use best-of-ensemble similarity.
+**Conformer handling:** All 3D methods (B8–B11, B13, B15–B17, and MUT) use a single shared conformer per molecule: the lowest MMFF94 energy geometry found across 20 ETKDGv3-sampled starting conformers (`pruneRmsThresh=0.5`). Each molecule's pkl entry contains exactly one conformer. Potential follow-up: add a best-of-ensemble variant using the full 20-conformer set to test whether flexibility adds signal.
 
 ---
 

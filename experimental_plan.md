@@ -8,9 +8,9 @@ The evaluation is structured in two phases: **internal consistency validation** 
 
 ---
 
-## 2. Baseline Methods
+## 2. Methods
 
-A comprehensive set of baselines is critical. The following methods span five distinct paradigms—topological fingerprints, descriptor-based, 3D shape/field, learned representations, and quantum-chemical descriptors—ensuring the comparison is not biased toward any single approach.
+This section covers both the baselines (§2.1–2.5) and the Methods Under Test (§2.6). Baselines span five distinct paradigms — topological fingerprints, descriptor-based, 3D shape/field, learned representations, and quantum-chemical descriptors — ensuring the comparison is not biased toward any single approach. MUTs are the family of electron-density-based similarity methods whose performance we want to test against this set.
 
 ### 2.1 Topological Fingerprints (2D)
 
@@ -57,6 +57,27 @@ These are the most relevant comparisons since your method also derives from QM. 
 | **Coulomb Matrix + kernel distance** | Encodes nuclear charges and internuclear distances. The original QM-inspired molecular descriptor for ML. | Rupp et al., *Phys. Rev. Lett.* 2012, 108, 058301. |
 | **SOAP (Smooth Overlap of Atomic Positions)** | Encodes local atomic environments as power spectra of spherical harmonics. Can be compared via a kernel. | Bartók et al., *Phys. Rev. B* 2013, 87, 184115. |
 | **ACSF (Atom-Centered Symmetry Functions)** | Encodes radial and angular distributions of neighbors around each atom. Aggregated to molecular level. | Behler, *J. Chem. Phys.* 2011, 134, 074106. |
+
+### 2.6 Methods Under Test (MUTs) — Electron Density
+
+The MUT family takes the `(n_atoms, 127)` coefficient matrix produced by ElektroNN and condenses it into a fixed-size molecular embedding paired with a distance function. Every variant shares the same upstream pipeline (shared single-conformer, shared ElektroNN forward pass) — only the **condensing scheme** and **distance** differ. Each variant gets its own stable `id` so results tables can distinguish them.
+
+**Training-data fairness constraint.** Any learned component — on the embedding side, the distance side, or both — must be fit only on a held-out training split. It must **never** see the evaluation datasets (D3–D9). This rules out leakage as an explanation for MUT performance and keeps the comparison with baselines fair.
+
+**Staged complexity.** The early MUT variants (MUT-mean and the three listed below) deliberately keep the embedding step non-trainable, so we can first characterise the raw signal in the coefficients before adding representation learning on top. Trainable-embedding MUTs (attention pooling, small GNNs over the adjacency graph, etc.) are **allowed and expected** as the family matures — they're just sequenced later. The distinction from the Uni-Mol / Chemprop baselines (§2.4) isn't "MUTs aren't trainable" but "MUTs operate on the ElektroNN electron-density coefficients, not on SMILES or raw 3D coordinates".
+
+**Why start with mean + Euclidean.** The coefficients are homogeneous — all 127 dims are expansion coefficients on the same basis, produced by one trained network, on one scale. That's very different from the ~200 RDKit descriptors (§2.2) which span orders of magnitude and demanded cosine. For ElektroNN coefficients, L2 respects magnitude as real signal (a coefficient of 2.0 physically means "twice the contribution of a coefficient of 1.0"), and mean-pooling already normalises for molecule size via the `1/n_atoms` factor.
+
+**Planned variants.** The following variants form a natural exploration of the condensing-scheme / distance-function space:
+
+| Variant ID | Condensing | Distance | Motivation |
+|------------|------------|----------|------------|
+| **MUT-mean** | Mean over atoms → `(127,)` | Euclidean | Simplest baseline for the family. Implemented first. |
+| **MUT-mean-cosine** | Mean over atoms → `(127,)` | Cosine | Direct A/B against MUT-mean. If magnitude is signal, Euclidean wins; if only direction matters, cosine wins. Cheap to add once MUT-mean is in place. |
+| **MUT-mean-irrep-weighted** | Mean over atoms → `(127,)` | Weighted Euclidean with per-irrep weights | The 127 dimensions split by irreducible representation: 14 scalars (0e), 42 vectors (14 × 3, 1o), 25 d (5 × 5, 2e), 28 f (4 × 7, 3o), 18 g (2 × 9, 4e). Plain L2 weighs every dim equally; real information content almost certainly isn't uniform across angular-momentum channels. Weight schemes to try: uniform (baseline), equal-per-channel (1/channel_size), tuned on a validation split. |
+| **MUT-mean-mahalanobis** | Mean over atoms → `(127,)` | Mahalanobis, using inverse covariance from training-set statistics | Generalisation of the irrep-weighted scheme: the full inverse covariance of pooled coefficients captures both dimension-wise scale differences and between-dimension correlations. Fit the covariance once on a held-out training split (e.g. a ChEMBL sample), reuse at inference. More principled than fixed irrep weights when coefficients co-vary. |
+
+**Future directions not yet scoped.** More sophisticated condensing schemes (attention-pooled with learned per-atom weights, graph-pooled via a small GNN over the cached `adjacencies`/`distances`, per-atom-type pooling) are interesting but deliberately deferred — the first round tests whether even the simplest global pooling captures meaningful similarity. These later variants will cross into trainable-embedding territory, subject to the training-data fairness constraint above. If MUT-mean and its variants all fail EXP-5 (bioisostere recognition, the critical hypothesis test), the problem is more likely with the representation than with the condensing scheme, and we should first investigate the coefficients themselves before adding pooling complexity.
 
 ---
 

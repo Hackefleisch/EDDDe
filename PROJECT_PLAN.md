@@ -24,7 +24,7 @@ Performance across six experiments that together span: embedding smoothness on c
 | Term | Definition |
 |------|------------|
 | **MUT** | Method Under Test: the electron-density-based embedding + its distance function. Treated as a black-box `embed(SMILES) -> vector` and `distance(v1, v2) -> float`. |
-| **Baseline** | Any non-MUT similarity/distance method listed in §3. |
+| **Baseline** | Any non-MUT similarity/distance method listed in §3.1. |
 | **Similarity / Distance** | For methods producing similarities in [0,1] (fingerprints with Tanimoto), distance is `1 - similarity`. For vector embeddings, distance is specified per method. All metrics framed as: smaller distance = more similar. |
 | **Query** | A molecule used as reference; other molecules are ranked by ascending distance to the query. |
 | **Active / Decoy / Inactive** | Active = confirmed binding/activity against target. Decoy = property-matched computationally generated non-binder. Inactive = experimentally verified non-binder. |
@@ -35,7 +35,9 @@ Performance across six experiments that together span: embedding smoothness on c
 
 ---
 
-## 3. Baseline Methods
+## 3. Methods
+
+### 3.1 Baselines
 
 All baselines must be computed on the same molecule sets as MUT. When applicable, use RDKit (≥2024.03) as the canonical implementation.
 
@@ -64,6 +66,21 @@ All baselines must be computed on the same molecule sets as MUT. When applicable
 **Rationale for QM-descriptor baselines:** Critical for isolating whether any MUT advantage stems from electron density specifically, vs. QM information in general.
 
 **Conformer handling:** All 3D methods (B8–B11, B13, B15–B17, and MUT) use a single shared conformer per molecule: the lowest MMFF94 energy geometry found across 20 ETKDGv3-sampled starting conformers (`pruneRmsThresh=0.5`). Each molecule's pkl entry contains exactly one conformer. Potential follow-up: add a best-of-ensemble variant using the full 20-conformer set to test whether flexibility adds signal.
+
+### 3.2 Methods Under Test (MUTs)
+
+MUTs condense the `(n_atoms, 127)` ElektroNN coefficient matrix into a fixed-size embedding paired with a distance function. All variants share the same upstream stage (`Stage.ELEKTRONN_COEFFS`) and are registered in `eddde/methods/muts/`. Each variant gets its own stable `id` so benchmark outputs can distinguish condensing schemes.
+
+| ID | Condensing scheme | Distance | Status | Rationale |
+|----|-------------------|----------|--------|-----------|
+| MUT-mean | Mean over atoms → `(127,)` | Euclidean (L2) | implemented | Simplest sensible baseline. Coefficients are homogeneous (same basis), so L2 respects magnitude as real chemical signal; mean over atoms already normalises for molecule size. |
+| MUT-mean-cosine | Mean over atoms → `(127,)` | Cosine | planned | A/B against MUT-mean to test whether magnitude carries signal or washes out. If cosine matches or beats L2, the direction of the coefficient vector is what matters, not its length. |
+| MUT-mean-irrep-weighted | Mean over atoms → `(127,)`, then weighted L2 with per-irrep weights | Weighted Euclidean | planned | The 127 dims are **not** equivalent: they split as 14 scalars (0e) + 42 vectors (14×3, 1o) + 25 d (5×5, 2e) + 28 f (4×7, 3o) + 18 g (2×9, 4e). Plain L2 treats every dim equally; per-irrep weights (uniform, equal-per-channel, or tuned on a validation split) test whether certain angular-momentum channels carry disproportionate similarity signal. |
+| MUT-mean-mahalanobis | Mean over atoms → `(127,)`, then Mahalanobis with inverse covariance from training-set statistics | Mahalanobis | planned | Accounts for dimension-wise scale differences and between-dimension correlations in the pooled coefficient space. The covariance is a learned object — fit once on a training split, reused at inference. More principled than fixed per-irrep weights when correlations matter. |
+
+**Training-data fairness constraint:** Any learned component — whether on the embedding side (attention weights, pooled GNN parameters) or the distance side (Mahalanobis covariance, tuned irrep weights) — must be fit only on a held-out training split. It must **never** see the evaluation datasets (D3–D9). This keeps the comparison with baselines fair and rules out leakage as an explanation for MUT performance. Trainable MUTs are explicitly allowed as the variant family matures; early variants (MUT-mean and the three listed above) keep the embedding non-trainable on purpose, so we can first characterise the raw signal in the coefficients before adding representation learning.
+
+**Future directions (not yet scoped):** attention-pooled condensing (learned per-atom weights), graph-pooled condensing (aggregate using `adjacencies` / `distances`, possibly via a small GNN), per-atom-type pooled embedding (separate mean per element, concatenated). These are candidates for trainable-embedding MUTs once the non-trainable baseline is established.
 
 ---
 

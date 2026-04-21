@@ -64,6 +64,8 @@ def distance(self, e1, e2) -> float: ...  # smaller = more similar
 
 Register the instance in [eddde/methods/__init__.py](eddde/methods/__init__.py). On next run, the runner embeds + runs all experiments automatically.
 
+**MUT training-data fairness:** Any learned component (on the embedding side, the distance side, or both) must be fit only on a held-out training split — never on the evaluation datasets (D3–D9). Early MUT variants (MUT-mean and siblings) keep the embedding non-trainable to characterise the raw coefficient signal first; trainable-embedding variants (attention pooling, graph-pooled GNN, etc.) are expected later and allowed under the same fairness rule. See [PROJECT_PLAN.md §3.2](PROJECT_PLAN.md) and [experimental_plan.md §2.6](experimental_plan.md) for the current variant list and rationale.
+
 ### Adding a dataset
 
 Subclass `Dataset` in `eddde/data/sources/`. Implement `build_smiles(out: Path)` to write a CSV with columns `id`, `smiles`, and any experiment-specific columns (e.g. `position` for homologous series). If the dataset ships its own 3D structures, set `has_native_conformers = True` and implement `build_native_conformers(smiles_csv, out)` — the conformer stage version will then track `dataset.version` rather than the global `conformers.VERSION`, so it won't be affected by changes to the default conformer generator.

@@ -81,12 +81,14 @@ Stages are built in order: `SMILES → CONFORMERS → ELEKTRONN_COEFFS`. Methods
 ```
 cache/datasets/{dataset_id}/smiles.csv
 cache/datasets/{dataset_id}/conformers.pkl   # dict[mol_id -> rdkit.Mol with conformers]
-cache/datasets/{dataset_id}/elektronn_coeffs.pkl  # dict[mol_id -> np.ndarray (n_atoms, 127)]
+cache/datasets/{dataset_id}/elektronn_coeffs.pkl  # {"coefficients": {mol_id: (n_atoms, 127)}, "adjacencies": {mol_id: (n_atoms, n_atoms)}, "distances": {mol_id: (n_atoms, n_atoms)}}
 cache/embeddings/{method_id}/{dataset_id}.pkl     # dict[mol_id -> embedding]
 results/EXP-X/{method_id}/{dataset_id}/metrics.json
 ```
 
 `cache/` and `results/` are gitignored; fully regenerated on demand.
+
+**Atom-index alignment.** Row `i` of `coefficients[mol_id]` corresponds to atom `i` of `conformers[mol_id].GetAtomWithIdx(i)`, and `adjacencies[mol_id][i, :]` / `distances[mol_id][i, :]` use the same indexing. Hydrogens are included (from `Chem.AddHs`), so `n_atoms` counts them — filter by `atom.GetAtomicNum() != 1` if a method wants heavy-atom-only. Positions and bond types are **not** duplicated into the coefficient bundle; a method that needs them should declare `needs = Stage.ELEKTRONN_COEFFS` and read them from `stage_data[Stage.CONFORMERS][mol_id]` via `mol.GetConformer().GetAtomPosition(i)` and `mol.GetAtomWithIdx(i).GetBonds()`.
 
 ## Conventions
 

@@ -45,9 +45,18 @@ No test suite, linter, or formatter is configured. Don't invent lint/test comman
 
 "Stale" means the producer's `version` string or any upstream artifact's content hash has changed since the manifest was written. Cascades automatically: bumping `conformers.VERSION` invalidates every downstream artifact for all datasets without native conformers.
 
+If any method needs `Stage.ELEKTRONN_COEFFS`, `main()` pre-warms the ElektroNN model singleton before the dataset loop so that model-weight loading (≈12 s on CPU) is excluded from per-dataset timing. The singleton lives in `_MODEL_CACHE` inside `elektronn_runner` for the duration of the process.
+
 ### Caching ([eddde/cache.py](eddde/cache.py))
 
-Every artifact (CSV, pkl, metrics.json) gets a sidecar `*.manifest.json` with `{version, inputs, output_hash, compute_time, upstream_compute_time}`. `upstream_compute_time` accumulates the full chain cost so it can be read in O(1) from any manifest.
+Every artifact (CSV, pkl, metrics.json) gets a sidecar `*.manifest.json` with:
+
+```
+version, inputs, output_hash, compute_time, upstream_compute_time,
+timestamp, dataset_size, compute_time_per_mol
+```
+
+`upstream_compute_time` accumulates the full chain cost so it can be read in O(1) from any manifest. `dataset_size` records the number of molecules at write time; `compute_time_per_mol` is `compute_time / dataset_size`. `Manifest.chain_time_per_mol()` divides the full chain time by `dataset_size` — this is the `s/mol` column in `results/SUMMARY.md`.
 
 ### Adding a method
 

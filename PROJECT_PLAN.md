@@ -280,7 +280,7 @@ Each experiment must produce the following, saved to `results/EXP-X/`:
 - `plots/` — per-experiment visualizations (see §8)
 - `metadata.json` — conformer settings used, software versions, random seeds, compute time
 
-**Embeddings and distance matrices** (intermediate products) are saved to `cache/` with filenames `{method_id}_{dataset_id}.npz` to allow reruns without recomputation.
+**Embeddings** (intermediate products) are saved to `cache/embeddings/{method_id}/{dataset_id}.pkl` and indexed by manifest for staleness tracking. Every artifact sidecar records `{version, inputs, output_hash, compute_time, upstream_compute_time, timestamp, dataset_size, compute_time_per_mol}`. The aggregate `results/SUMMARY.md` table includes an `s/mol` column (end-to-end chain time per molecule, averaged across datasets).
 
 ---
 

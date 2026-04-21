@@ -25,8 +25,8 @@ eddde/
   runner.py                  # main() — stages → embeddings → experiments
   data/
     base.py                  # Stage enum, Dataset base class
-    conformers.py            # default: RDKit ETKDGv3 + MMFF94
-    elektronn_runner.py      # ElektroNN integration (stub)
+    conformers.py            # default: RDKit ETKDGv3 + MMFF94, lowest-energy conformer
+    elektronn_runner.py      # ElektroNN integration with module-level model cache
     pipeline.py              # build_up_to(dataset, stage)
     sources/                 # one file per dataset
   methods/
@@ -81,16 +81,22 @@ New dependencies go in `pyproject.toml` — don't silently assume they are prese
 | **Topological fingerprints** | |
 | B1 ECFP4, B2 ECFP6, B3 FCFP4 | done |
 | B4 MACCS keys, B5 Atom Pair, B6 Topological Torsion | done |
+| B7 RDKit 2D descriptors (cosine distance) | done |
+| **ElektroNN integration** | |
+| Conformer generation (ETKDGv3 + MMFF94, lowest-energy single conformer) | done |
+| ElektroNN coefficient + adjacency + distance matrix pipeline | done |
+| Module-level model cache + pre-warm (weight loading excluded from per-dataset timing) | done |
+| **MUTs** | |
+| MUT-mean (atom-mean → 127-d, Euclidean) | done |
+| MUT-mean-cosine, MUT-mean-irrep-weighted, MUT-mean-mahalanobis | planned |
 | **EXP-1 datasets** | |
 | S1 n-alkanes, S2 n-alkanols, S3 n-alkanoic acids | done |
 | S4 n-alkylamines, S5 polyethylene glycols | done |
 | **EXP-1 metrics & plots** | |
 | M-MONO, M-SMOOTH, M-LIN (with p-values) | done |
 | Plots: distance from first, all-pairs scatter, consecutive distances | done |
+| Summary report with per-method avg rank and s/mol | done |
 | **Remaining** | |
-| B7 RDKit 2D descriptors | pending |
 | B8–B17 (3D shape, learned, QM-descriptor baselines) | pending |
 | EXP-2 datasets (S6–S8) and metrics | pending |
 | EXP-3 through EXP-6 | pending |
-| ElektroNN integration | pending |
-| MUT implementations | pending |

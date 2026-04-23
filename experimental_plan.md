@@ -162,14 +162,17 @@ Cyclohexane with substituents: -H, -CH₃, -OH, -NH₂, -F, -Cl, -COOH, -CHO, -C
 - Data: [welqrate.org](https://welqrate.org)
 - Key advantage over MoleculeNet: hierarchical curation with confirmatory and counter screens, PAINS filtering, defined stereochemistry.
 
-**Datasets:** AID1798 (5-HT1a), AID435008 (Rab9), AID435034 (ALDH1a), AID1259247 (KAT2A), AID2689 (hTDP1), AID624202 (ADRB2), AID449739 (Cav3 T-type), AID488997 (OPRK1), AID652065 (FEN1).
+**Datasets:** AID435008 (Orexin 1 Receptor), AID1798 (M1 Muscarinic – Allosteric Agonist), AID435034 (M1 Muscarinic – Allosteric Antagonist), AID1843 (Kir2.1 Potassium Channel), AID2258 (KCNQ2 Potassium Channel), AID463087 (Cav3 T-type Calcium Channel), AID488997 (Choline Transporter), AID2689 (STK33 Kinase), AID485290 (Tyrosyl-DNA Phosphodiesterase).
+
+**Scaffold split interpretation:** The Bemis-Murcko scaffold of a molecule is its ring system with all side chains stripped. A scaffold split groups all molecules sharing the same scaffold, then assigns whole scaffold groups to train, valid, or test (3:1:1). No scaffold present in the test set ever appears in train, so a method cannot succeed by recognising side-chain variants of training scaffolds. WelQrate provides five seeds — five independent random shuffles of the scaffold-group ordering before the parcelling step. Each seed yields a different but equally valid partition; the molecule's scaffold never changes, only which partition it lands in. For EXP-3a the **test** split supplies the query pool; results are averaged across all five seeds to reduce sensitivity to any single partition.
 
 **Procedure:**
 
 1. For each dataset and each method, compute the embedding for every compound.
-2. Use scaffold split (provided by WelQrate) to prevent data leakage from analog enrichment.
-3. For the similarity-based retrieval task: for each active compound as query, rank all other compounds by similarity (ascending distance) and compute retrieval metrics.
-4. For the classification task: use a k-NN classifier (k = 5, 10, 20) based on the embedding distance. Predict active vs. inactive.
+2. For each scaffold seed, draw query actives from the test split.
+3. For the similarity-based retrieval task: for each query, rank all other compounds by distance and compute retrieval metrics.
+4. Average metrics over queries and seeds per target.
+5. For the classification task: use a k-NN classifier (k = 5, 10, 20) based on the embedding distance. Predict active vs. inactive.
 
 **Metrics (as recommended by WelQrate):**
 
@@ -179,7 +182,7 @@ Cyclohexane with substituents: -H, -CH₃, -OH, -NH₂, -F, -Cl, -COOH, -CHO, -C
 - **DCG₁₀₀** (Discounted Cumulative Gain at rank 100)
 - **AUC-ROC** (overall discrimination)
 
-Report mean ± standard error across 5 random query selections per target.
+Report mean ± standard error across five scaffold seeds per target.
 
 #### 3b. MUV (Maximum Unbiased Validation)
 

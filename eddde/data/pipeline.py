@@ -22,7 +22,36 @@ from . import conformers, elektronn_runner
 from .base import STAGE_ORDER, Dataset, Stage, dataset_size, stage_path
 
 # Bump to invalidate every cached SMILES CSV project-wide (cascades to downstream stages).
-SMILES_FILTER_VERSION = "v1-elektronn-elements"
+SMILES_FILTER_VERSION = "v2-elements-saltstripped"
+
+
+def _strip_salts(csv: Path, ds_id: str) -> None:
+    """Replace each SMILES with its largest fragment to drop salt counterions.
+
+    Counterions (Na+, Cl-, ...) alter the electron density without biological
+    relevance. Stripping them before _filter_unsupported_atoms prevents
+    molecules with e.g. Na+ counterions from being dropped for the wrong reason.
+    """
+    import pandas as pd
+    from rdkit import Chem
+    from rdkit.Chem.MolStandardize import rdMolStandardize
+
+    chooser = rdMolStandardize.LargestFragmentChooser()
+    df = pd.read_csv(csv)
+    modified = 0
+    new_smiles = list(df["smiles"])
+    for i, smi in enumerate(df["smiles"]):
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None:
+            continue
+        largest = chooser.choose(mol)
+        if largest.GetNumAtoms() < mol.GetNumAtoms():
+            new_smiles[i] = Chem.MolToSmiles(largest)
+            modified += 1
+    df["smiles"] = new_smiles
+    if modified:
+        print(f"  [{ds_id}:smiles] stripped salts from {modified} molecule(s)")
+    df.to_csv(csv, index=False)
 
 
 def _filter_unsupported_atoms(csv: Path, ds_id: str) -> None:
@@ -91,6 +120,7 @@ def _build_stage(ds: Dataset, stage: Stage) -> None:
     with timed() as t:
         if stage == Stage.SMILES:
             ds.build_smiles(out)
+            _strip_salts(out, ds.id)
             _filter_unsupported_atoms(out, ds.id)
         elif stage == Stage.CONFORMERS:
             smiles = stage_path(ds.id, Stage.SMILES)

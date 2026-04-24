@@ -7,8 +7,6 @@ Computed on heavy atoms of the shared single conformer.
 Distance: inverse-Manhattan similarity (Ballester & Richards, J. Comput. Chem.
 2007, 28, 1711), expressed as 1 -> similarity so smaller = more similar.
 Uses RDKit's GetUSR / GetUSRScore.
-
-Smoke test: `python -m eddde.methods.baselines.usr`
 """
 from __future__ import annotations
 
@@ -37,30 +35,3 @@ class USR:
 
     def distance(self, e1: Any, e2: Any) -> float:
         return 1.0 - rdMolDescriptors.GetUSRScore(e1.tolist(), e2.tolist())
-
-
-if __name__ == "__main__":
-    from rdkit.Chem import AllChem
-
-    probes = {"benzene": "c1ccccc1", "toluene": "Cc1ccccc1", "cyclohexane": "C1CCCCC1"}
-    method = USR()
-
-    mols: dict[str, Chem.Mol] = {}
-    for name, smi in probes.items():
-        mol = Chem.AddHs(Chem.MolFromSmiles(smi))
-        AllChem.EmbedMolecule(mol, randomSeed=0xEDDDE)
-        AllChem.MMFFOptimizeMolecule(mol)
-        mols[name] = mol
-
-    embeddings = method.embed_dataset({Stage.CONFORMERS: mols})
-
-    print("USR embeddings (12-d):")
-    for name, vec in embeddings.items():
-        print(f"  {name:>11s}: {np.array2string(vec, precision=3, suppress_small=True)}")
-
-    print("\nPairwise distances (1 - GetUSRScore):")
-    names = list(embeddings)
-    for i, n1 in enumerate(names):
-        for n2 in names[i + 1 :]:
-            d = method.distance(embeddings[n1], embeddings[n2])
-            print(f"  d({n1:>11s}, {n2:>11s}) = {d:.4f}")

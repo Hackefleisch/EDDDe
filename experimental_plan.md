@@ -216,18 +216,30 @@ Report mean ± standard error across 5 random query selections per target.
 
 **Objective:** Determine whether the electron density distance function better reflects potency changes associated with small structural modifications than topological methods.
 
-**Data source:** MMP-cliffs from ChEMBL, as defined by the Bajorath group.
+**Data source — preferred: MoleculeACE benchmark.** van Tilborg, Alenicheva & Grisoni (2022) released a pre-curated activity-cliff benchmark covering 30 ChEMBL macromolecular targets (35,632 unique molecules, ~7%–52% cliff fraction per target) with established train/test splits, cliff labels, and per-pair similarity metrics ready for download. Using this dataset removes a substantial curation burden and makes our results directly comparable to a published deep-learning baseline study.
 
-- Primary reference: Hu et al., *J. Chem. Inf. Model.* 2012, 52, 1138–1145. DOI: [10.1021/ci3001138](https://doi.org/10.1021/ci3001138)
+- Primary reference: van Tilborg, Alenicheva & Grisoni, *J. Chem. Inf. Model.* 2022, 62, 5938–5951. DOI: [10.1021/acs.jcim.2c01073](https://doi.org/10.1021/acs.jcim.2c01073)
+- Tool / data: [github.com/molML/MoleculeACE](https://github.com/molML/MoleculeACE)
+- Per-target curated CSVs: [github.com/molML/MoleculeACE/tree/main/MoleculeACE/Data/benchmark_data](https://github.com/molML/MoleculeACE/tree/main/MoleculeACE/Data/benchmark_data)
+
+**Activity cliff definition (MoleculeACE):** A pair (A, B) is an activity cliff if (a) similarity ≥ 0.9 by **any** of {ECFP4-Tanimoto, scaffold-ECFP-Tanimoto, scaled Levenshtein on canonical SMILES}, **and** (b) the pair shows ≥10× difference (≥1 log unit) in Ki or EC50 against the same target. This is broader than the MMP-only definition (it captures scaffold-decoration changes and SMILES-edit cliffs that aren't strict MMPs) but still aligns with the medicinal-chemistry intuition of "small structural change, large potency change". Roughly 87% of MMP-cliffs are also captured by this definition (per the paper's analysis).
+
+**Background references retained (cliff concept and MMP-only fallback):**
+
 - Activity cliff concept review: Stumpfe & Bajorath, *J. Med. Chem.* 2012, 55, 2932–2942. DOI: [10.1021/jm201706b](https://doi.org/10.1021/jm201706b)
-- Data construction: Bajorath et al., *F1000Research* 2014, 3, 36. DOI: [10.12688/f1000research.3-36.v2](https://doi.org/10.12688/f1000research.3-36.v2)
+- MMP-cliff definition: Hu et al., *J. Chem. Inf. Model.* 2012, 52, 1138–1145. DOI: [10.1021/ci3001138](https://doi.org/10.1021/ci3001138)
+- Data construction (MMP route): Bajorath et al., *F1000Research* 2014, 3, 36. DOI: [10.12688/f1000research.3-36.v2](https://doi.org/10.12688/f1000research.3-36.v2)
 
-**Activity cliff definition used:** Matched molecular pairs (MMPs) with transformation size ≤ 13 heavy atoms and |ΔpKi| ≥ 2 (i.e., ≥100-fold potency difference). Use Ki values only to ensure assay-independent comparisons.
+**Data ingest procedure (MoleculeACE route):**
 
-**Data construction procedure:**
+1. Pull the 30 per-target CSVs from the MoleculeACE repo. Each row carries SMILES, exp_mean, cliff_mol (bool), and split.
+2. Apply the project-wide ElektroNN element filter — drop any molecule whose H-explicit graph contains atoms outside {H, C, N, O, F, S, Cl}. Track and report the per-target drop rate; targets with high drop rate (e.g. halogenated kinase inhibitors) may need to be excluded from headline metrics.
+3. Reconstruct cliff pairs within each target by using the published similarity criteria (or by re-using MoleculeACE's `get_cliffs` helper) so pair labels survive the element-filter pruning.
+
+**MMP-only fallback procedure** (use only if a strict MMP definition is needed for a follow-up analysis):
 
 1. Extract from ChEMBL (latest release) all compounds with Ki values against human targets.
-2. Generate MMPs using the Hussain–Rea algorithm (RDKit `rdFMCS` or `mmpdb` tool, [github.com/rdkit/mmpdb](https://github.com/rdkit/mmpdb)).
+2. Generate MMPs using the Hussain–Rea algorithm ([github.com/rdkit/mmpdb](https://github.com/rdkit/mmpdb)).
 3. For each MMP, compute |ΔpKi|.
 4. Label pairs with |ΔpKi| ≥ 2 as activity cliffs; pairs with |ΔpKi| < 0.5 as non-cliffs.
 5. Sample ~5,000 cliff pairs and ~5,000 non-cliff pairs (matched for scaffold diversity).

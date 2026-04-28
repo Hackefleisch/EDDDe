@@ -124,10 +124,12 @@ def _write_summary_md(method_ids: list[str]) -> None:
 
     for exp_id, exp in EXPERIMENTS.items():
         if not hasattr(exp, "collect_results") or not hasattr(exp, "metric_direction"):
+            lines.append(f"## {exp_id}\n\n_No report implemented for this experiment._\n")
             continue
 
         df = exp.collect_results(method_ids)
         if df.empty:
+            lines.append(f"## {exp_id}\n\n_No results available yet._\n")
             continue
 
         metrics = list(exp.metric_direction.keys())

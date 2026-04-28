@@ -63,6 +63,7 @@ from sklearn.metrics import roc_auc_score
 
 from ..data.base import Stage
 from ..data.sources.welqrate import N_SCAFFOLD_SEEDS
+from .base import result_dir
 
 WELQRATE_DATASET_IDS = [
     "AID1798", "AID1843", "AID2258", "AID2689",
@@ -323,3 +324,16 @@ class Exp3aWelQrate:
             )
         )
         return metrics
+
+    def collect_results(self, method_ids: list[str]) -> pd.DataFrame:
+        rows = []
+        for m_id in method_ids:
+            for ds_id in self.datasets:
+                p = result_dir(self.id, m_id, ds_id) / "metrics.json"
+                if not p.exists():
+                    continue
+                data = json.loads(p.read_text())
+                for metric in self.metric_direction:
+                    if metric in data:
+                        rows.append({"method": m_id, "dataset": ds_id, "metric": metric, "value": data[metric]})
+        return pd.DataFrame(rows)

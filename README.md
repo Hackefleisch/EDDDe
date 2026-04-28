@@ -73,6 +73,14 @@ The runner checks every stage, embedding, and experiment result for staleness an
 
 New dependencies go in `pyproject.toml` — don't silently assume they are present.
 
+**Visualize a dataset** — render a 2D molecule grid for any registered dataset:
+
+```bash
+python scripts/draw_dataset.py <dataset_id> [--out <path>] [--cols <n>] [--mol-size <px>]
+```
+
+Builds the SMILES stage if needed (cached) and saves a PNG grid to `figures/<dataset_id>_molecules.png` by default. Example: `python scripts/draw_dataset.py S6 --cols 3`
+
 ---
 
 ## Current results

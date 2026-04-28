@@ -93,7 +93,7 @@ MUTs condense the `(n_atoms, 127)` ElektroNN coefficient matrix into a fixed-siz
 | D3 | WelQrate (9 targets) | EXP-3a | [welqrate.org](https://welqrate.org) / [arXiv:2411.09820](https://arxiv.org/abs/2411.09820) |
 | D4 | MUV (17 targets) | EXP-3b | [Riniker-Landrum benchmarking platform](https://github.com/rdkit/benchmarking_platform); original [Rohrer & Baumann 2009](https://doi.org/10.1021/ci8002649) |
 | D5 | DUD-E (102 targets) | EXP-3c | [dude.docking.org](http://dude.docking.org) / [Mysinger et al. 2012](https://doi.org/10.1021/jm300687e) |
-| D6 | ChEMBL-derived MMP-cliffs | EXP-4 | Current ChEMBL release + `mmpdb`; method: [Hu et al. 2012](https://doi.org/10.1021/ci3001138) |
+| D6 | Activity cliff pairs (30 ChEMBL targets) | EXP-4 | **Primary**: MoleculeACE pre-curated data — [github.com/molML/MoleculeACE/tree/main/MoleculeACE/Data/benchmark_data](https://github.com/molML/MoleculeACE/tree/main/MoleculeACE/Data/benchmark_data) / [van Tilborg et al. 2022](https://doi.org/10.1021/acs.jcim.2c01073). **Fallback** (if cliff definition needs to be MMP-only): current ChEMBL release + `mmpdb`; method: [Hu et al. 2012](https://doi.org/10.1021/ci3001138) |
 | D7 | SwissBioisostere replacements | EXP-5a | [swissbioisostere.ch](http://www.swissbioisostere.ch) / [Isert et al. 2022](https://doi.org/10.1093/nar/gkab1047) |
 | D8 | Curated classical bioisostere pairs | EXP-5b | Literature-based list, ~50–100 pairs; seed list from [Meanwell 2011](https://doi.org/10.1021/jm1013693) |
 | D9 | Riniker-Landrum 88-target benchmark | EXP-6 | [github.com/rdkit/benchmarking_platform](https://github.com/rdkit/benchmarking_platform) / [Riniker & Landrum 2013](https://doi.org/10.1186/1758-2946-5-26) |
@@ -183,15 +183,21 @@ All experiments produce MUT results and corresponding results for every applicab
 
 - **Type**: external
 - **Question**: Does MUT distance track potency difference across MMPs?
-- **Data**: D6. Construction:
-  - Extract all ChEMBL compounds with Ki against human targets (high-confidence only, use ChEMBL's curation standards).
-  - Generate MMPs via Hussain-Rea algorithm (`mmpdb`), transformation size ≤ 13 heavy atoms.
-  - Label: cliff if |ΔpKi| ≥ 2; non-cliff if |ΔpKi| < 0.5.
-  - Sample ~5,000 of each class, matched for scaffold diversity.
+- **Data**: D6. Two construction options — pick one and document:
+  - **(Preferred) MoleculeACE benchmark** ([van Tilborg et al. 2022](https://doi.org/10.1021/acs.jcim.2c01073)): 30 ChEMBL targets, 35,632 unique molecules, pre-curated with cliff labels, train/test splits, and per-pair similarity metrics. Activity cliff = pair with similarity ≥ 0.9 in any of {ECFP-Tanimoto, scaffold-ECFP-Tanimoto, scaled-Levenshtein on SMILES} AND ≥10× difference in Ki or EC50. Apply project-wide ElektroNN element filter (drop molecules with unsupported atoms) before computing metrics. Data: [github.com/molML/MoleculeACE/tree/main/MoleculeACE/Data/benchmark_data](https://github.com/molML/MoleculeACE/tree/main/MoleculeACE/Data/benchmark_data).
+  - **(Fallback) MMP-only** if a strict matched-molecular-pair definition is required: extract ChEMBL Ki against human targets, generate MMPs via Hussain-Rea (`mmpdb`, transformation size ≤ 13 heavy atoms), label cliff if |ΔpKi| ≥ 2 and non-cliff if |ΔpKi| < 0.5, sample ~5,000 of each class matched for scaffold diversity.
 - **Metrics**: M-SALI-DIST (distribution comparison), M-CLIFF-AUC, M-DIST-POTENCY-RHO
 - **Expected behavior**: Topological FPs assign very high similarity (low distance) to both cliffs and non-cliffs because transformations are small by construction — poor cliff discrimination. MUT should assign higher distance to cliff pairs if it captures electronic perturbation from small structural changes.
 - **Success criterion**: MUT's Spearman ρ (distance vs. |ΔpKi|) > 0.3 AND significantly higher than all B1–B6 (p < 0.01).
 - **Sub-analysis**: Stratify M-DIST-POTENCY-RHO by transformation type: R-group / ring / linker changes.
+- **Optional upgrade — decide at implementation time**: cliffs have multiple causes (electronic, steric, receptor-specific induced fit) and a ligand-only method cannot resolve receptor-specific cases. To make claims sharper, stratify pairs into easy / medium / hard subsets by transformation class:
+  - **Easy / electronic**: charge-state change, H-bond donor/acceptor swap, strong π-perturbation (e.g. -OMe → -CN). MUT *should* clearly beat topological FPs.
+  - **Easy / steric**: Δheavy-atom-count ≥ 3, branching change (Me → tBu), ring fusion. MUT *should* beat topological FPs moderately.
+  - **Medium**: halogen swap (F↔Cl), single H↔Me, polar-to-polar same-class swap. Calibration zone.
+  - **Hard / receptor-required**: bioisosteric swap, single-atom change in flexible region, subtle conformational lock. Parity expected — no ligand-only method should win.
+  - Add **diagnostic tests** that bypass the receptor entirely (verify the embedding is sensitive to known-important features): among non-cliff pairs, MUT distance for charge-changing / H-bond-changing / large-Δvolume pairs should exceed MUT distance for inert pairs, and the gap should be larger than for ECFP. If MUT fails these, EXP-4 is dead before the cliff AUC matters.
+  - **Reframes the headline claim** from "MUT beats baselines at cliff detection" to "MUT beats baselines on ligand-explainable cliffs and matches them on receptor-specific cliffs" — weaker but truer, and dovetails with EXP-2 (Hammett) and EXP-5 (bioisosteres).
+  - **Cost**: writing the transformation classifier is non-trivial (a few hundred LOC of cheminformatics). Decide at EXP-4 implementation time whether to pay it.
 
 ### 5.7 EXP-5: Bioisostere Recognition
 

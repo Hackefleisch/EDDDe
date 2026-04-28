@@ -107,6 +107,26 @@ results/EXP-X/{method_id}/{dataset_id}/metrics.json
 - When adding large real-world datasets (D3–D9) the drop rate may be non-trivial; revisit whether the filter should become per-dataset-opt-out before those experiments land.
 - The filter lives in [eddde/data/pipeline.py](eddde/data/pipeline.py) (`_filter_unsupported_atoms`); bump `SMILES_FILTER_VERSION` there to invalidate all cached SMILES CSVs when the supported set changes.
 
+## Helper Scripts
+
+Scripts live in [scripts/](scripts/). Run them from the project root with the virtual environment active.
+
+### `scripts/draw_dataset.py`
+
+Renders a PNG grid of 2D molecule images for any registered dataset.
+
+```bash
+python scripts/draw_dataset.py <dataset_id> [--out <path>] [--cols <n>] [--mol-size <px>]
+```
+
+- Builds the SMILES stage via the standard pipeline (cached; only runs if stale).
+- Output defaults to `figures/<dataset_id>_molecules.png`.
+- `--cols` controls grid width (default 4); `--mol-size` controls tile pixel size (default 200).
+
+Example: `python scripts/draw_dataset.py S6 --cols 3`
+
+---
+
 ## Conventions
 
 - Distance convention: smaller = more similar. For similarity-based methods (Tanimoto, ROCS), convert as `distance = 1 - similarity`.

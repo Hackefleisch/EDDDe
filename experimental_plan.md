@@ -219,18 +219,30 @@ Report mean ± standard error across five scaffold seeds per target.
 
 **Objective:** Determine whether the electron density distance function better reflects potency changes associated with small structural modifications than topological methods.
 
-**Data source:** MMP-cliffs from ChEMBL, as defined by the Bajorath group.
+**Data source — preferred: MoleculeACE benchmark.** van Tilborg, Alenicheva & Grisoni (2022) released a pre-curated activity-cliff benchmark covering 30 ChEMBL macromolecular targets (35,632 unique molecules, ~7%–52% cliff fraction per target) with established train/test splits, cliff labels, and per-pair similarity metrics ready for download. Using this dataset removes a substantial curation burden and makes our results directly comparable to a published deep-learning baseline study.
 
-- Primary reference: Hu et al., *J. Chem. Inf. Model.* 2012, 52, 1138–1145. DOI: [10.1021/ci3001138](https://doi.org/10.1021/ci3001138)
+- Primary reference: van Tilborg, Alenicheva & Grisoni, *J. Chem. Inf. Model.* 2022, 62, 5938–5951. DOI: [10.1021/acs.jcim.2c01073](https://doi.org/10.1021/acs.jcim.2c01073)
+- Tool / data: [github.com/molML/MoleculeACE](https://github.com/molML/MoleculeACE)
+- Per-target curated CSVs: [github.com/molML/MoleculeACE/tree/main/MoleculeACE/Data/benchmark_data](https://github.com/molML/MoleculeACE/tree/main/MoleculeACE/Data/benchmark_data)
+
+**Activity cliff definition (MoleculeACE):** A pair (A, B) is an activity cliff if (a) similarity ≥ 0.9 by **any** of {ECFP4-Tanimoto, scaffold-ECFP-Tanimoto, scaled Levenshtein on canonical SMILES}, **and** (b) the pair shows ≥10× difference (≥1 log unit) in Ki or EC50 against the same target. This is broader than the MMP-only definition (it captures scaffold-decoration changes and SMILES-edit cliffs that aren't strict MMPs) but still aligns with the medicinal-chemistry intuition of "small structural change, large potency change". Roughly 87% of MMP-cliffs are also captured by this definition (per the paper's analysis).
+
+**Background references retained (cliff concept and MMP-only fallback):**
+
 - Activity cliff concept review: Stumpfe & Bajorath, *J. Med. Chem.* 2012, 55, 2932–2942. DOI: [10.1021/jm201706b](https://doi.org/10.1021/jm201706b)
-- Data construction: Bajorath et al., *F1000Research* 2014, 3, 36. DOI: [10.12688/f1000research.3-36.v2](https://doi.org/10.12688/f1000research.3-36.v2)
+- MMP-cliff definition: Hu et al., *J. Chem. Inf. Model.* 2012, 52, 1138–1145. DOI: [10.1021/ci3001138](https://doi.org/10.1021/ci3001138)
+- Data construction (MMP route): Bajorath et al., *F1000Research* 2014, 3, 36. DOI: [10.12688/f1000research.3-36.v2](https://doi.org/10.12688/f1000research.3-36.v2)
 
-**Activity cliff definition used:** Matched molecular pairs (MMPs) with transformation size ≤ 13 heavy atoms and |ΔpKi| ≥ 2 (i.e., ≥100-fold potency difference). Use Ki values only to ensure assay-independent comparisons.
+**Data ingest procedure (MoleculeACE route):**
 
-**Data construction procedure:**
+1. Pull the 30 per-target CSVs from the MoleculeACE repo. Each row carries SMILES, exp_mean, cliff_mol (bool), and split.
+2. Apply the project-wide ElektroNN element filter — drop any molecule whose H-explicit graph contains atoms outside {H, C, N, O, F, S, Cl}. Track and report the per-target drop rate; targets with high drop rate (e.g. halogenated kinase inhibitors) may need to be excluded from headline metrics.
+3. Reconstruct cliff pairs within each target by using the published similarity criteria (or by re-using MoleculeACE's `get_cliffs` helper) so pair labels survive the element-filter pruning.
+
+**MMP-only fallback procedure** (use only if a strict MMP definition is needed for a follow-up analysis):
 
 1. Extract from ChEMBL (latest release) all compounds with Ki values against human targets.
-2. Generate MMPs using the Hussain–Rea algorithm (RDKit `rdFMCS` or `mmpdb` tool, [github.com/rdkit/mmpdb](https://github.com/rdkit/mmpdb)).
+2. Generate MMPs using the Hussain–Rea algorithm ([github.com/rdkit/mmpdb](https://github.com/rdkit/mmpdb)).
 3. For each MMP, compute |ΔpKi|.
 4. Label pairs with |ΔpKi| ≥ 2 as activity cliffs; pairs with |ΔpKi| < 0.5 as non-cliffs.
 5. Sample ~5,000 cliff pairs and ~5,000 non-cliff pairs (matched for scaffold diversity).
@@ -242,6 +254,29 @@ Report mean ± standard error across five scaffold seeds per target.
 - **Distance–potency correlation:** Spearman ρ between d(A,B) and |ΔpKi| across all MMP pairs. A strong correlation means the distance function tracks activity changes. Compute this overall and stratified by transformation type (R-group change, ring change, linker change).
 
 **Expected outcomes:** Topological fingerprints (especially ECFP4 with Tanimoto) will yield the classic activity cliff signature: very high similarity (low distance) but large potency differences, resulting in high SALI but poor cliff-vs-non-cliff discrimination because high similarity is assigned indiscriminately. The electron density method should show greater distance for cliff pairs than fingerprints do (because the electronic perturbation from the structural change is captured), leading to better distance–potency correlation. The key test is whether ρ(distance, ΔpKi) is significantly higher for the electron density method.
+
+**Caveat on the headline claim.** EDDDe is ligand-only; the receptor pocket is not modelled. Whether a small structural change produces a cliff depends on what the pocket cares about — electronic complementarity, H-bonding partners, steric tolerance, induced fit. A ligand-only method can therefore at best detect *ligand-side* perturbations that *could* explain a cliff, not predict cliffs definitively. Reporting MUT as "beating baselines at cliff prediction" without acknowledging this overstates the result.
+
+**Optional upgrade — decide at EXP-4 implementation time.** Stratify pairs by transformation cause to make the claim sharper and to surface where each method actually works. This converts the headline from "MUT beats baselines" to "MUT beats baselines on the cliff classes where ligand electronics can plausibly explain the cliff, and matches them on receptor-specific classes" — weaker but more honest, and far more diagnostic.
+
+Proposed strata:
+
+- **Easy / electronic.** Charge-state change, H-bond donor/acceptor swap, strong π-system perturbation (e.g. -OMe → -CN). MUT should clearly beat topological fingerprints — these are the changes electron density is built to detect.
+- **Easy / steric.** Δheavy-atom count ≥ 3, branching change (Me → tBu), ring fusion. MUT should beat topological fingerprints moderately, since local volume is encoded implicitly in the density.
+- **Medium.** Halogen swap (F↔Cl), single H↔Me, polar-to-polar same-class swap. Calibration zone — small but real perturbations.
+- **Hard / receptor-required.** Bioisosteric swap, single-atom change in a flexible region, subtle conformational locking. No ligand-only method should win here; reporting parity is the honest result.
+
+Add **diagnostic tests** that bypass the receptor entirely — these directly verify that the embedding picks up known-important features:
+
+- *Charge sensitivity*: among non-cliff pairs, do charge-changing pairs get larger MUT distance than neutral-only pairs? Compare against ECFP-Tanimoto.
+- *H-bond sensitivity*: same, for pairs that gain/lose a donor or acceptor.
+- *Local-volume sensitivity*: same, for pairs with ΔvdW-volume above threshold at the changed site.
+
+If MUT fails these, EXP-4 is effectively dead — there is no electronic or steric signal to begin with, regardless of cliff AUC.
+
+**Why this is optional.** The transformation classifier is a non-trivial chunk of cheminformatics (a few hundred LOC: SMARTS patterns for change-site detection, atom-level matching across the pair, charge-state and H-bond counting, vdW-volume estimation). The classification rules also embed judgment calls (e.g. is -OH → -SH "electronic" or "bioisosteric"?). Implementing it makes the experiment's conclusions much stronger, but it doubles the engineering effort for EXP-4. Decide at implementation time whether to pay that cost; the unstratified version still produces a publishable headline and the stratification can be added in a follow-up.
+
+This stratification also dovetails with EXP-2 (Hammett series — pure electronic test on a single scaffold) and EXP-5 (bioisosteres — receptor-aware functional equivalence): together they tell a coherent story about *what* ligand-derived electronics can and cannot explain.
 
 ---
 

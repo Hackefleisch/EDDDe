@@ -7,6 +7,7 @@ from .baselines.maccs import MACCSKeys
 from .baselines.atom_pair import AtomPair
 from .baselines.topological_torsion import TopologicalTorsion
 from .baselines.rdkit_descriptors import RDKitDescriptors
+from .baselines.usr import USR
 from .muts.mean import MutMean
 
 
@@ -26,4 +27,5 @@ _register(MACCSKeys())
 _register(AtomPair())
 _register(TopologicalTorsion())
 _register(RDKitDescriptors())
+_register(USR())
 _register(MutMean())

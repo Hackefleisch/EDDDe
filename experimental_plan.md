@@ -166,13 +166,16 @@ Cyclohexane with substituents: -H, -CH₃, -OH, -NH₂, -F, -Cl, -COOH, -CHO, -C
 
 **Scaffold split interpretation:** The Bemis-Murcko scaffold of a molecule is its ring system with all side chains stripped. A scaffold split groups all molecules sharing the same scaffold, then assigns whole scaffold groups to train, valid, or test (3:1:1). No scaffold present in the test set ever appears in train, so a method cannot succeed by recognising side-chain variants of training scaffolds. WelQrate provides five seeds — five independent random shuffles of the scaffold-group ordering before the parcelling step. Each seed yields a different but equally valid partition; the molecule's scaffold never changes, only which partition it lands in. For EXP-3a the **test** split supplies the query pool; results are averaged across all five seeds to reduce sensitivity to any single partition.
 
+**Pool composition:**
+
+- **Both tasks use the same pool:** valid + test (all non-train molecules, minus the molecule itself). Train is excluded to reduce computation — it is 60 % of the data and contributes no unique signal for non-learned methods. Valid molecules carry different scaffolds from the query by construction of the scaffold split. Test molecules include scaffold-mates of the query, which preserves a realistic retrieval setting where structurally similar molecules are present in the library. Scaffold-diversity analysis is delegated to EXP-6.
+
 **Procedure:**
 
 1. For each dataset and each method, compute the embedding for every compound.
 2. For each scaffold seed, draw query actives from the test split.
-3. For the similarity-based retrieval task: for each query, rank all other compounds by distance and compute retrieval metrics.
-4. Average metrics over queries and seeds per target.
-5. For the classification task: use a k-NN classifier (k = 5, 10, 20) based on the embedding distance. Predict active vs. inactive.
+3. Task 1 — for each query, rank the valid+test pool by ascending distance. Record the rank and distance of every active in the pool (inactive positions are implicit). Average retrieval metrics over queries and seeds per target.
+4. Task 2 — for each test molecule (active or inactive), find its k=5, 10, 20 nearest neighbors in the training split and vote on predicted label. Report AUC-ROC over all test molecules.
 
 **Metrics (as recommended by WelQrate):**
 
@@ -180,7 +183,7 @@ Cyclohexane with substituents: -H, -CH₃, -OH, -NH₂, -F, -Cl, -COOH, -CHO, -C
 - **BEDROC(α=20)** (Boltzmann-Enhanced Discrimination of ROC, early enrichment metric)
 - **EF₁%** (enrichment factor at 1% of ranked list)
 - **DCG₁₀₀** (Discounted Cumulative Gain at rank 100)
-- **AUC-ROC** (overall discrimination)
+- **AUC-ROC** (k-NN classification on test set, k = 5, 10, 20)
 
 Report mean ± standard error across five scaffold seeds per target.
 

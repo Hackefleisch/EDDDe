@@ -252,6 +252,29 @@ Report mean ± standard error across 5 random query selections per target.
 
 **Expected outcomes:** Topological fingerprints (especially ECFP4 with Tanimoto) will yield the classic activity cliff signature: very high similarity (low distance) but large potency differences, resulting in high SALI but poor cliff-vs-non-cliff discrimination because high similarity is assigned indiscriminately. The electron density method should show greater distance for cliff pairs than fingerprints do (because the electronic perturbation from the structural change is captured), leading to better distance–potency correlation. The key test is whether ρ(distance, ΔpKi) is significantly higher for the electron density method.
 
+**Caveat on the headline claim.** EDDDe is ligand-only; the receptor pocket is not modelled. Whether a small structural change produces a cliff depends on what the pocket cares about — electronic complementarity, H-bonding partners, steric tolerance, induced fit. A ligand-only method can therefore at best detect *ligand-side* perturbations that *could* explain a cliff, not predict cliffs definitively. Reporting MUT as "beating baselines at cliff prediction" without acknowledging this overstates the result.
+
+**Optional upgrade — decide at EXP-4 implementation time.** Stratify pairs by transformation cause to make the claim sharper and to surface where each method actually works. This converts the headline from "MUT beats baselines" to "MUT beats baselines on the cliff classes where ligand electronics can plausibly explain the cliff, and matches them on receptor-specific classes" — weaker but more honest, and far more diagnostic.
+
+Proposed strata:
+
+- **Easy / electronic.** Charge-state change, H-bond donor/acceptor swap, strong π-system perturbation (e.g. -OMe → -CN). MUT should clearly beat topological fingerprints — these are the changes electron density is built to detect.
+- **Easy / steric.** Δheavy-atom count ≥ 3, branching change (Me → tBu), ring fusion. MUT should beat topological fingerprints moderately, since local volume is encoded implicitly in the density.
+- **Medium.** Halogen swap (F↔Cl), single H↔Me, polar-to-polar same-class swap. Calibration zone — small but real perturbations.
+- **Hard / receptor-required.** Bioisosteric swap, single-atom change in a flexible region, subtle conformational locking. No ligand-only method should win here; reporting parity is the honest result.
+
+Add **diagnostic tests** that bypass the receptor entirely — these directly verify that the embedding picks up known-important features:
+
+- *Charge sensitivity*: among non-cliff pairs, do charge-changing pairs get larger MUT distance than neutral-only pairs? Compare against ECFP-Tanimoto.
+- *H-bond sensitivity*: same, for pairs that gain/lose a donor or acceptor.
+- *Local-volume sensitivity*: same, for pairs with ΔvdW-volume above threshold at the changed site.
+
+If MUT fails these, EXP-4 is effectively dead — there is no electronic or steric signal to begin with, regardless of cliff AUC.
+
+**Why this is optional.** The transformation classifier is a non-trivial chunk of cheminformatics (a few hundred LOC: SMARTS patterns for change-site detection, atom-level matching across the pair, charge-state and H-bond counting, vdW-volume estimation). The classification rules also embed judgment calls (e.g. is -OH → -SH "electronic" or "bioisosteric"?). Implementing it makes the experiment's conclusions much stronger, but it doubles the engineering effort for EXP-4. Decide at implementation time whether to pay that cost; the unstratified version still produces a publishable headline and the stratification can be added in a follow-up.
+
+This stratification also dovetails with EXP-2 (Hammett series — pure electronic test on a single scaffold) and EXP-5 (bioisosteres — receptor-aware functional equivalence): together they tell a coherent story about *what* ligand-derived electronics can and cannot explain.
+
 ---
 
 ### Experiment 5: Bioisostere Recognition

@@ -94,7 +94,9 @@ def generate(conformers_pkl: Path, out: Path) -> None:
     skipped = set(mols.keys()) - set(dataset.names)
     if skipped:
         preview = ", ".join(sorted(skipped)[:10]) + ("..." if len(skipped) > 10 else "")
-        print(f"  [elektronn] skipped {len(skipped)} molecule(s) with unsupported atoms: {preview}")
+        print(f"  [elektronn] skipped {len(skipped)} molecule(s) not accepted by MoleculeDataset: {preview}")
+        from ..cache import append_to_blacklist
+        append_to_blacklist(out.parent, skipped)
 
     model, device = _get_model()
 

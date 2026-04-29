@@ -25,8 +25,11 @@ SEED = 0xEDDDE
 
 def _keep_lowest_energy_conformer(mol: Chem.Mol) -> Chem.Mol:
     results = AllChem.MMFFOptimizeMoleculeConfs(mol)
-    # results is a list of (not_converged, energy) per conformer
-    best_idx = min(range(len(results)), key=lambda i: results[i][1])
+    # results is list of (not_converged, energy); not_converged == -1 means MMFF
+    # could not be parameterised for that conformer — exclude from energy ranking.
+    valid = [(i, e) for i, (nc, e) in enumerate(results) if nc != -1]
+    candidates = valid if valid else list(enumerate(r[1] for r in results))
+    best_idx = min(candidates, key=lambda ie: ie[1])[0]
     best_conf = mol.GetConformer(best_idx)
     new_mol = Chem.RWMol(mol)
     new_mol.RemoveAllConformers()
@@ -41,13 +44,23 @@ def generate(smiles_csv: Path, out: Path) -> None:
     params.randomSeed = SEED
 
     mols: dict[str, Chem.Mol] = {}
+    skipped: list[str] = []
     for _, row in df.iterrows():
         mol = Chem.MolFromSmiles(row["smiles"])
         if mol is None:
             raise ValueError(f"unparseable SMILES for id={row['id']}: {row['smiles']!r}")
         mol = Chem.AddHs(mol)
         AllChem.EmbedMultipleConfs(mol, numConfs=N_CONFS, params=params)
+        if mol.GetNumConformers() == 0:
+            skipped.append(str(row["id"]))
+            continue
         mols[str(row["id"])] = _keep_lowest_energy_conformer(mol)
+
+    if skipped:
+        preview = ", ".join(skipped[:10]) + ("..." if len(skipped) > 10 else "")
+        print(f"  [conformers] skipped {len(skipped)} molecule(s) where embedding produced 0 conformers: {preview}")
+        from ..cache import append_to_blacklist
+        append_to_blacklist(out.parent, skipped)
 
     with open(out, "wb") as f:
         pickle.dump(mols, f)

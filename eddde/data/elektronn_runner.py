@@ -30,10 +30,12 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from tqdm import tqdm
+
 
 VERSION = "elektronn-ensemble+graph-v2"
 
-BATCH_SIZE = 128
+BATCH_SIZE = 32
 NUM_WORKERS = 0
 
 _MODEL_CACHE: dict[str, Any] = {}
@@ -104,12 +106,14 @@ def generate(conformers_pkl: Path, out: Path) -> None:
 
     coefficients: dict[str, np.ndarray] = {}
     with torch.no_grad():
-        for batch in dataloader:
-            batch = batch.to(device)
-            predictions = model(batch)
-            predictions = unbatch(predictions, batch.batch)
-            for name, pred in zip(batch.name, predictions):
-                coefficients[name] = pred.detach().cpu().numpy()
+        with tqdm(total=len(dataset), desc="elektronn", unit="mol") as pbar:
+            for batch in dataloader:
+                batch = batch.to(device)
+                predictions = model(batch)
+                predictions = unbatch(predictions, batch.batch)
+                for name, pred in zip(batch.name, predictions):
+                    coefficients[name] = pred.detach().cpu().numpy()
+                pbar.update(len(predictions))
 
     adjacencies: dict[str, np.ndarray] = {}
     distances: dict[str, np.ndarray] = {}

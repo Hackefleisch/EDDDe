@@ -392,8 +392,8 @@ This stratification also dovetails with EXP-2 (Hammett series — pure electroni
 
 For all 3D methods (ROCS, USR, USRCAT, eSim, Coulomb matrix, SOAP, ACSF, and the electron density method itself), use a single shared conformer per molecule:
 
-- Generate 20 starting geometries with RDKit ETKDGv3, `pruneRmsThresh=0.5`.
-- Minimize all 20 with MMFF94, keep only the lowest-energy result.
+- Generate 5 starting geometries with RDKit ETKDGv3, `pruneRmsThresh=0.5`.
+- Minimize all 5 with MMFF94, keep only the lowest-energy result.
 - Every method then operates on this single conformer — no per-method conformer selection logic.
 
 Rationale: a single minimum-energy conformer is the natural input for QM-derived representations (ElektroNN produces coefficients for a fixed geometry) and avoids inflated compute for methods that would otherwise iterate over an ensemble. If results suggest conformational flexibility matters, a best-of-ensemble follow-up can be added as a separate method variant for all 3D methods uniformly.

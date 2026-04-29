@@ -24,8 +24,8 @@ from rdkit.Chem import AllChem
 from tqdm import tqdm
 
 
-VERSION = "etkdgv3-mmff94-n20-lowest-energy-v1"
-N_CONFS = 20
+VERSION = "etkdgv3-mmff94-n5-lowest-energy-v1"
+N_CONFS = 5
 PRUNE_RMS_THRESH = 0.5
 SEED = 0xEDDDE
 N_WORKERS = os.cpu_count() or 1

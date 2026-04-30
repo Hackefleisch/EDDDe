@@ -1,52 +1,39 @@
 """EXP-4: Activity Cliff Analysis (PROJECT_PLAN.md §5.6).
 
-Pair construction (MoleculeACE benchmark, van Tilborg 2022):
-  Within each ChEMBL target, build the pool of "similar pairs" — pairs (i, j)
-  where similarity ≥ 0.9 by ANY of:
-    - ECFP4-Tanimoto (Morgan radius=2, 1024 bits)
-    - generic-Murcko-scaffold ECFP4-Tanimoto
-    - 1 - normalized Levenshtein on canonical SMILES
-  These are MoleculeACE's exact criteria. Within the similar-pair pool, a pair
-  is a CLIFF if |ΔpY| ≥ 1 (i.e. ≥10× difference in Ki/EC50). Otherwise it is
-  a NON-CLIFF similar pair. EXP-4's metrics are computed on this pool.
+Per ChEMBL target, the similar-pair pool is the set of pairs (i, j) with
+similarity >= 0.9 by ANY of:
+  - ECFP4-Tanimoto (Morgan radius=2, 1024 bits)
+  - graph-framework ECFP-Tanimoto (MakeScaffoldGeneric on the whole molecule)
+  - 1 - normalized Levenshtein on canonical SMILES
+A similar pair is a CLIFF if |ΔpY| >= 1 (i.e. >= 10x difference in Ki/EC50),
+otherwise NON-CLIFF. Metrics are computed on the similar-pair pool only.
 
-Note on parameters: the cliff-DEFINING ECFP uses radius=2, fpSize=1024 to match
-MoleculeACE exactly. Our baseline ECFP4 method (B1) uses fpSize=2048 — it's a
-benchmarked method, not a cliff criterion, so it's free to differ.
+The cliff-defining ECFP uses radius=2, fpSize=1024. Baseline B1 (ECFP4) uses
+2048 bits independently.
 
 Metrics (§6.1):
-  M-DIST-POTENCY-RHO — Spearman ρ between d(A,B) and |ΔpY|. Higher = better.
-  M-CLIFF-AUC        — ROC-AUC for cliff vs non-cliff using SALI as score.
-                       Higher = better. Reflects "rank all pairs by SALI"
-                       per PROJECT_PLAN §6.1.
-  M-SALI-DIST        — KS statistic between SALI distributions of cliff vs
-                       non-cliff similar pairs. Higher = better separation.
+  M-DIST-POTENCY-RHO  Spearman rho between d(A,B) and |ΔpY|. Higher is better.
+  M-CLIFF-AUC         ROC-AUC for cliff vs non-cliff using SALI as score.
+                      Higher is better.
+  M-SALI-DIST         KS statistic between cliff and non-cliff SALI
+                      distributions. Higher is better separation.
 
-SALI definition: SALI(A,B) = |ΔpY| / max(ε, d_method(A,B)). The plan writes
-this as |ΔpKi|/(1 − sim(A,B)); since EDDDe's distance convention is
-"smaller = more similar" with d = 1 − sim for Tanimoto-style methods and
-native distance otherwise, substituting d_method generalises to any method
-and reduces to the spec form for similarity-based baselines (CLAUDE.md
-"Distance convention").
+SALI(A,B) = |ΔpY| / max(eps, d_method(A,B)). PROJECT_PLAN §6.1 writes this
+as |ΔpKi|/(1 - sim); for similarity-based methods d = 1 - sim and the two
+forms coincide, so substituting d_method generalises to native-distance
+methods (CLAUDE.md "Distance convention").
 
-A pair-distance matrix on N≈3k molecules per target would be O(N²) ≈ 5M
-distance calls; restricting to the similar-pair pool (typically 10²–10³ pairs)
-keeps wall-clock per-target tractable across 30 targets and fits the
-literature's framing of activity-cliff analysis (cliffs are by definition
-similar pairs).
+Restricting to similar pairs (typically a few hundred per target) instead of
+all O(N^2) pairs keeps the per-target cost bounded across 30 targets and
+fits the activity-cliff framing (cliffs are similar pairs by definition).
 
 Output files written to `out/`:
-  pairs.csv
-    a, b, sim_ecfp, sim_scaffold, sim_lev, delta_pY_abs, cliff (0/1), distance
-    One row per similar pair (i < j).
-  metrics.json
-    Per-metric value + p-values + pool counts.
+  pairs.csv     a, b, sim_ecfp, sim_scaffold, sim_lev, delta_pY_abs, cliff, distance
+  metrics.json  metric values, p-values, and pool counts
 
 Plots (§8):
-  cliff_violin.png      — d(A,B) distribution split by cliff/non-cliff,
-                          one column per method, pairs pooled across targets.
-  dist_vs_dpy.png       — d(A,B) vs |ΔpY| scatter, one column per method,
-                          pairs pooled across targets, with OLS line.
+  cliff_violin.png  d(A,B) split by cliff/non-cliff, one column per method
+  dist_vs_dpy.png   d(A,B) vs |ΔpY| scatter, one column per method
 """
 from __future__ import annotations
 
@@ -69,14 +56,14 @@ from .base import result_dir
 
 
 SIM_THRESHOLD = 0.9
-CLIFF_DPY_THRESHOLD = 1.0  # |ΔpY| ≥ 1 ⇔ ≥ 10× potency
+CLIFF_DPY_THRESHOLD = 1.0  # |ΔpY| >= 1 means >= 10x potency
 EPS = 1e-9
 ECFP_RADIUS = 2
 ECFP_BITS = 1024
 
 
 # ---------------------------------------------------------------------------
-# Similarity helpers — all return a symmetric (n, n) float matrix in [0, 1]
+# Similarity helpers. Each returns a symmetric (n, n) float matrix in [0, 1]
 # with diagonal = 1.
 # ---------------------------------------------------------------------------
 
@@ -96,11 +83,9 @@ def _tanimoto_matrix(fps: list) -> np.ndarray:
 
 
 def _scaffold_mol(mol: Chem.Mol) -> Chem.Mol:
-    """Graph framework: MakeScaffoldGeneric on the whole molecule (all atoms->C,
-    all bond orders->single). Matches MoleculeACE's get_scaffold_matrix exactly:
-    they apply MakeScaffoldGeneric to the molecule directly (NOT to GetScaffoldForMol's
-    Murcko scaffold). The fallback to GetScaffoldForMol is for the rare cases
-    where MakeScaffoldGeneric raises."""
+    """Graph framework: all atoms to C, all bond orders to single, applied to
+    the whole molecule. Falls back to the plain Murcko scaffold on the rare
+    inputs where MakeScaffoldGeneric raises."""
     try:
         return MurckoScaffold.MakeScaffoldGeneric(mol)
     except Exception:
@@ -108,8 +93,7 @@ def _scaffold_mol(mol: Chem.Mol) -> Chem.Mol:
 
 
 def _scaled_levenshtein_matrix(smiles: list[str]) -> np.ndarray:
-    """1 - Levenshtein(s_i, s_j) / max(len_i, len_j). MoleculeACE's
-    "scaled Levenshtein similarity"."""
+    """sim(s, t) = 1 - Levenshtein(s, t) / max(len(s), len(t))."""
     from rapidfuzz.distance import Levenshtein
     from rapidfuzz import process
 
@@ -150,26 +134,17 @@ class Exp4ActivityCliffs:
             bad = [mol_ids[i] for i, m in enumerate(mols) if m is None]
             raise RuntimeError(f"[{dataset_id}] {len(bad)} unparseable SMILES: {bad[:5]}...")
 
-        # Three similarity matrices — full n×n, but only used to mask the upper
-        # triangle for pair selection. n ≤ ~3000 per target so memory is fine
-        # (3000² float32 ≈ 34 MB × 3 ≈ 100 MB, transient).
         fps_full = _morgan_fps(mols)
         fps_scaf = _morgan_fps([_scaffold_mol(m) for m in mols])
         sim_ecfp = _tanimoto_matrix(fps_full)
         sim_scaf = _tanimoto_matrix(fps_scaf)
         sim_lev = _scaled_levenshtein_matrix(smiles)
 
-        # "any of {ECFP, scaffold, Levenshtein} ≥ 0.9" per MoleculeACE's
-        # docstring intent and PROJECT_PLAN §5.6. Note: MoleculeACE's published
-        # find_cliffs() actually does `sim == 1` after summing three boolean
-        # matrices, which excludes pairs passing ≥2 criteria — apparently a
-        # `+` vs `|` typo. We follow the documented intent (true OR).
         similar = (
             (sim_ecfp >= SIM_THRESHOLD)
             | (sim_scaf >= SIM_THRESHOLD)
             | (sim_lev  >= SIM_THRESHOLD)
         )
-        # Upper triangle, no self-pairs.
         triu = np.triu(np.ones_like(similar, dtype=bool), k=1)
         i_idx, j_idx = np.where(similar & triu)
 
@@ -185,7 +160,6 @@ class Exp4ActivityCliffs:
         }
 
         if n_pairs == 0:
-            # No similar pairs — all metrics undefined.
             pd.DataFrame(columns=[
                 "a", "b", "sim_ecfp", "sim_scaffold", "sim_lev",
                 "delta_pY_abs", "cliff", "distance",
@@ -196,7 +170,6 @@ class Exp4ActivityCliffs:
         d_pY = np.abs(pY[i_idx] - pY[j_idx])
         cliff = (d_pY >= CLIFF_DPY_THRESHOLD).astype(np.int8)
 
-        # Method distance per pair.
         dist = np.empty(n_pairs, dtype=np.float64)
         for k, (i, j) in enumerate(zip(i_idx, j_idx)):
             dist[k] = float(method.distance(embeddings[mol_ids[i]], embeddings[mol_ids[j]]))
@@ -213,13 +186,11 @@ class Exp4ActivityCliffs:
         })
         pairs_df.to_csv(out / "pairs.csv", index=False)
 
-        # M-DIST-POTENCY-RHO
         if n_pairs >= 2:
             rho, p_rho = spearmanr(dist, d_pY)
             metrics["M-DIST-POTENCY-RHO"] = float(rho) if not np.isnan(rho) else float("nan")
             metrics["M-DIST-POTENCY-RHO_pvalue"] = float(p_rho) if not np.isnan(p_rho) else float("nan")
 
-        # SALI-based metrics — need both classes.
         n_cliff = int(cliff.sum())
         n_noncliff = int((1 - cliff).sum())
         metrics["n_cliff_pairs"] = n_cliff
@@ -235,7 +206,6 @@ class Exp4ActivityCliffs:
         (out / "metrics.json").write_text(_json_metrics(metrics))
         return metrics
 
-    # -- summary collection (mirrors EXP-1 / EXP-2 pattern) ------------------
 
     def collect_results(self, method_ids: list[str]) -> pd.DataFrame:
         rows = []
@@ -253,8 +223,6 @@ class Exp4ActivityCliffs:
                         "value": data.get(metric),
                     })
         return pd.DataFrame(rows)
-
-    # -- plots ---------------------------------------------------------------
 
     def make_plots(self, exp_results_dir: Path, method_ids: list[str]) -> None:
         plots_dir = exp_results_dir / "plots"
@@ -320,7 +288,7 @@ class Exp4ActivityCliffs:
             for i, body in enumerate(parts["bodies"]):
                 body.set_facecolor("#F44336" if "cliff (" in keep[i][1] and not keep[i][1].startswith("non") else "#2196F3")
                 body.set_alpha(0.6)
-        fig.suptitle("EXP-4: Distance distribution — cliff vs non-cliff similar pairs (pooled across 30 targets)", y=1.02)
+        fig.suptitle("EXP-4: Distance distribution, cliff vs non-cliff similar pairs (pooled across 30 targets)", y=1.02)
         fig.tight_layout()
         fig.savefig(plots_dir / "cliff_violin.png", dpi=150, bbox_inches="tight")
         plt.close(fig)

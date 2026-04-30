@@ -7,23 +7,22 @@ Data:  github.com/molML/MoleculeACE/tree/main/MoleculeACE/Data/benchmark_data
 Each target ships as a per-target CSV with columns:
   smiles, exp_mean [nM], y, cliff_mol, split, y [pEC50/pKi]
 
-We ingest each as a separate Dataset subclass so the runner can track caching
-and staleness per target independently — same convention as WelQrate.
+Each target is a separate Dataset subclass so the runner tracks caching and
+staleness per target independently.
 
 build_smiles() downloads the raw CSV from MoleculeACE GitHub raw into
   cache/datasets/{target_id}/raw/molecule_ace.csv
 then writes smiles.csv with columns:
   id           "{target_id}_{row_idx:04d}"
-  smiles       canonical SMILES from MoleculeACE
-  pY           -log10(activity in M) — i.e. pKi or pEC50, whichever applies
-  cliff_mol    0/1 per-molecule MoleculeACE cliff flag (diagnostic only;
-               EXP-4 reconstructs pair labels from similarity criteria)
-  split        "train" | "test" — MoleculeACE's QSAR train/test split.
-               Diagnostic only; EXP-4 uses all molecules.
-  assay_type   "Ki" | "EC50"
+  smiles       canonical SMILES
+  pY           -log10(activity in M), i.e. pKi or pEC50
+  cliff_mol    0/1 per-molecule cliff flag from the upstream CSV (diagnostic
+               only; EXP-4 reconstructs pair labels from similarity criteria)
+  split        "train" or "test" from the upstream QSAR split (diagnostic
+               only; EXP-4 uses all molecules)
+  assay_type   "Ki" or "EC50"
 
-Pair construction and cliff labelling live in EXP-4, not here, because they're
-experiment-specific and shouldn't bloat the SMILES stage cache.
+Pair construction and cliff labelling live in EXP-4, not here.
 """
 
 from __future__ import annotations

@@ -118,7 +118,6 @@ class Exp4ActivityCliffs:
         "M-CLIFF-AUC":        +1,
         "M-SALI-DIST":        +1,
     }
-    metric_datasets = {m: MOLECULE_ACE_DATASET_IDS for m in metric_direction}
 
     def run(self, method, stage_data, embeddings, dataset_id, out):
         df: pd.DataFrame = stage_data[Stage.SMILES]
@@ -188,11 +187,11 @@ class Exp4ActivityCliffs:
 
         if n_pairs >= 2:
             rho, p_rho = spearmanr(dist, d_pY)
-            metrics["M-DIST-POTENCY-RHO"] = float(rho) if not np.isnan(rho) else float("nan")
-            metrics["M-DIST-POTENCY-RHO_pvalue"] = float(p_rho) if not np.isnan(p_rho) else float("nan")
+            metrics["M-DIST-POTENCY-RHO"] = float(rho)
+            metrics["M-DIST-POTENCY-RHO_pvalue"] = float(p_rho)
 
         n_cliff = int(cliff.sum())
-        n_noncliff = int((1 - cliff).sum())
+        n_noncliff = int((cliff == 0).sum())
         metrics["n_cliff_pairs"] = n_cliff
         metrics["n_noncliff_pairs"] = n_noncliff
 
@@ -269,24 +268,23 @@ class Exp4ActivityCliffs:
             if df.empty:
                 ax.set_visible(False)
                 continue
-            data = [
-                df.loc[df["cliff"] == 0, "distance"].to_numpy(),
-                df.loc[df["cliff"] == 1, "distance"].to_numpy(),
+            groups = [
+                (df.loc[df["cliff"] == 0, "distance"].to_numpy(), "non-cliff", "#2196F3"),
+                (df.loc[df["cliff"] == 1, "distance"].to_numpy(), "cliff",     "#F44336"),
             ]
-            labels = [f"non-cliff (n={len(data[0])})", f"cliff (n={len(data[1])})"]
-            # Drop empty groups (violinplot raises on empty arrays).
-            keep = [(d, lbl) for d, lbl in zip(data, labels) if len(d) > 0]
-            if not keep:
+            # violinplot raises on empty arrays.
+            groups = [(d, name, color) for d, name, color in groups if len(d) > 0]
+            if not groups:
                 ax.set_visible(False)
                 continue
-            parts = ax.violinplot([d for d, _ in keep], showmeans=True, showmedians=True)
-            ax.set_xticks(range(1, len(keep) + 1))
-            ax.set_xticklabels([lbl for _, lbl in keep], fontsize=8)
+            parts = ax.violinplot([d for d, _, _ in groups], showmeans=True, showmedians=True)
+            ax.set_xticks(range(1, len(groups) + 1))
+            ax.set_xticklabels([f"{name} (n={len(d)})" for d, name, _ in groups], fontsize=8)
             ax.set_ylabel("d(A, B)")
             ax.set_title(m_id, fontsize=9)
             ax.grid(True, alpha=0.3, axis="y")
-            for i, body in enumerate(parts["bodies"]):
-                body.set_facecolor("#F44336" if "cliff (" in keep[i][1] and not keep[i][1].startswith("non") else "#2196F3")
+            for body, (_, _, color) in zip(parts["bodies"], groups):
+                body.set_facecolor(color)
                 body.set_alpha(0.6)
         fig.suptitle("EXP-4: Distance distribution, cliff vs non-cliff similar pairs (pooled across 30 targets)", y=1.02)
         fig.tight_layout()

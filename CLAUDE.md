@@ -63,10 +63,13 @@ Every artifact (CSV, pkl, metrics.json) gets a sidecar `*.manifest.json` with:
 
 ```
 version, inputs, output_hash, compute_time, upstream_compute_time,
-timestamp, dataset_size, compute_time_per_mol
+timestamp, dataset_size, compute_time_per_mol,
+distance_time_per_pair, n_pairs_benchmarked
 ```
 
 `upstream_compute_time` accumulates the full chain cost so it can be read in O(1) from any manifest. `dataset_size` records the number of molecules at write time; `compute_time_per_mol` is `compute_time / dataset_size`. `Manifest.chain_time_per_mol()` divides the full chain time by `dataset_size` — this is the `s/mol` column in `results/SUMMARY.md`.
+
+`distance_time_per_pair` (only populated on **embedding** manifests) is the mean wall-clock time of one `method.distance(e1, e2)` call, measured by [eddde/methods/base.py](eddde/methods/base.py) `benchmark_distance` immediately after embedding via a time-budgeted sample (target ~1 s, bounded `[20, 2000]` pairs, 5-call warmup, seeded). It surfaces in `results/SUMMARY.md` as the `s/pair` column. The benchmark re-runs whenever embeddings rebuild; existing pre-benchmark manifests get a one-shot in-place upgrade in `runner._embed_if_stale` so adopting the field doesn't require cascade rebuilds.
 
 ### Adding a method
 

@@ -61,6 +61,8 @@ python -m eddde
 
 The runner checks every stage, embedding, and experiment result for staleness and runs only what needs updating. Adding a new method, dataset, or experiment and re-running produces incremental results without touching anything already cached.
 
+**Compute expectations.** A cold run (no caches) on the full dataset suite can take up to a day. Conformer generation is parallelised across all available CPU cores (`os.cpu_count()` workers in [eddde/data/conformers.py](eddde/data/conformers.py)), but it is still the dominant cost on large datasets. ElektroNN inference runs on GPU when available; the default `BATCH_SIZE = 32` in [eddde/data/elektronn_runner.py](eddde/data/elektronn_runner.py) requires roughly 6 GB of GPU memory — lower it if you hit OOM, raise it if you have headroom.
+
 ---
 
 ## Extending

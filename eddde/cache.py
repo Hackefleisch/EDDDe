@@ -109,6 +109,27 @@ def write_manifest(
     return m
 
 
+def blacklist_path(dataset_cache_dir: Path) -> Path:
+    return dataset_cache_dir / "blacklist.txt"
+
+
+def append_to_blacklist(dataset_cache_dir: Path, mol_ids: "Iterable[str]") -> None:
+    """Append mol_ids to the dataset blacklist (one id per line, cumulative across stages)."""
+    from collections.abc import Iterable  # noqa: PLC0415
+    path = blacklist_path(dataset_cache_dir)
+    with open(path, "a") as f:
+        for mid in mol_ids:
+            f.write(str(mid) + "\n")
+
+
+def read_blacklist(dataset_cache_dir: Path) -> set[str]:
+    """Return all mol_ids ever blacklisted for this dataset (empty set if none)."""
+    path = blacklist_path(dataset_cache_dir)
+    if not path.exists():
+        return set()
+    return {line.strip() for line in path.read_text().splitlines() if line.strip()}
+
+
 @contextmanager
 def timed():
     """Usage: with timed() as t: ...; elapsed = t['seconds']"""

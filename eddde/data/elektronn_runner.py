@@ -30,10 +30,12 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from tqdm import tqdm
 
-VERSION = "elektronn-ensemble+graph-v2"
 
-BATCH_SIZE = 128
+VERSION = "elektronn-ensemble+graph-v3-compact-dtypes"
+
+BATCH_SIZE = 32
 NUM_WORKERS = 0
 
 _MODEL_CACHE: dict[str, Any] = {}
@@ -81,6 +83,7 @@ def generate(conformers_pkl: Path, out: Path) -> None:
 
     with open(conformers_pkl, "rb") as f:
         mols: dict[str, Chem.Mol] = pickle.load(f)
+    mol_ids = set(mols.keys())
 
     with tempfile.TemporaryDirectory() as tmpdir:
         mol_dict: dict[str, str] = {}
@@ -88,13 +91,16 @@ def generate(conformers_pkl: Path, out: Path) -> None:
             sdf_path = Path(tmpdir) / f"{mol_id}.sdf"
             Chem.MolToMolFile(mol, str(sdf_path))
             mol_dict[mol_id] = str(sdf_path)
+        del mols
 
         dataset = MoleculeDataset(mol_dict, verbose=True)
 
-    skipped = set(mols.keys()) - set(dataset.names)
+    skipped = mol_ids - set(dataset.names)
     if skipped:
         preview = ", ".join(sorted(skipped)[:10]) + ("..." if len(skipped) > 10 else "")
-        print(f"  [elektronn] skipped {len(skipped)} molecule(s) with unsupported atoms: {preview}")
+        print(f"  [elektronn] skipped {len(skipped)} molecule(s) not accepted by MoleculeDataset: {preview}")
+        from ..cache import append_to_blacklist
+        append_to_blacklist(out.parent, skipped)
 
     model, device = _get_model()
 
@@ -102,19 +108,23 @@ def generate(conformers_pkl: Path, out: Path) -> None:
 
     coefficients: dict[str, np.ndarray] = {}
     with torch.no_grad():
-        for batch in dataloader:
-            batch = batch.to(device)
-            predictions = model(batch)
-            predictions = unbatch(predictions, batch.batch)
-            for name, pred in zip(batch.name, predictions):
-                coefficients[name] = pred.detach().cpu().numpy()
+        with tqdm(total=len(dataset), desc="elektronn", unit="mol") as pbar:
+            for batch in dataloader:
+                batch = batch.to(device)
+                predictions = model(batch)
+                predictions = unbatch(predictions, batch.batch)
+                for name, pred in zip(batch.name, predictions):
+                    coefficients[name] = pred.detach().cpu().numpy()
+                pbar.update(len(predictions))
 
     adjacencies: dict[str, np.ndarray] = {}
     distances: dict[str, np.ndarray] = {}
     for name in dataset.names:
         mol = dataset.get_mol_by_name(name)
-        adjacencies[name] = Chem.GetAdjacencyMatrix(mol)
-        distances[name] = Chem.GetDistanceMatrix(mol)
+        # adjacency is 0/1 (no bond orders requested) → uint8.
+        # distance is bond-count topological distance; single-component mols cap well below int16.
+        adjacencies[name] = Chem.GetAdjacencyMatrix(mol).astype(np.uint8)
+        distances[name] = Chem.GetDistanceMatrix(mol).astype(np.int16)
 
     payload = {
         "coefficients": coefficients,

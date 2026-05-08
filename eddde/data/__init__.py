@@ -10,6 +10,7 @@ from .sources.peg import PEG
 from .sources.subst_benzenes import SubstBenzenes
 from .sources.subst_cyclohexanes import SubstCyclohexanes
 from .sources.hammett_series import HammettSeries
+from .sources.welqrate import ALL_WELQRATE
 
 
 DATASETS: dict[str, Dataset] = {}
@@ -29,3 +30,5 @@ _register(PEG())
 _register(SubstBenzenes())
 _register(SubstCyclohexanes())
 _register(HammettSeries())
+for _ds in ALL_WELQRATE:
+    _register(_ds)

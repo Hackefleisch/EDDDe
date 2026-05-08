@@ -15,6 +15,7 @@ from ..cache import (
     hash_file,
     is_stale,
     manifest_path,
+    read_blacklist,
     timed,
     write_manifest,
 )
@@ -143,11 +144,106 @@ def _build_stage(ds: Dataset, stage: Stage) -> None:
     )
 
 
+def _patch_manifest(artifact: Path, new_output_hash: str, new_dataset_size: int, new_inputs: dict | None = None) -> None:
+    """Update an existing manifest's output_hash, dataset_size, and optionally inputs in-place.
+
+    Used by the sync pass to keep the manifest chain consistent after blacklist filtering
+    without changing version or triggering downstream staleness on the next run.
+    """
+    m_path = manifest_path(artifact)
+    m = Manifest.load(m_path)
+    if m is None:
+        return
+    m.output_hash = new_output_hash
+    m.dataset_size = new_dataset_size
+    m.compute_time_per_mol = m.compute_time / new_dataset_size if new_dataset_size else 0.0
+    if new_inputs:
+        m.inputs.update(new_inputs)
+    m_path.write_text(m.to_json())
+
+
+def _sync_blacklisted(ds: Dataset, up_to: Stage, verbose: bool) -> None:
+    """After all stages are built, remove blacklisted mol_ids from every stage artifact.
+
+    Each stage (conformers, elektronn) appends to a per-dataset blacklist.txt when it
+    cannot process a molecule. This function reads that blacklist, filters the SMILES CSV
+    and all downstream PKL files in-place, then patches the manifest chain so that the
+    next staleness check sees consistent hashes and does not spuriously rebuild anything.
+    """
+    import pickle
+
+    import pandas as pd
+
+    cache_dir = stage_path(ds.id, Stage.SMILES).parent
+    blacklisted = read_blacklist(cache_dir)
+    if not blacklisted:
+        return
+
+    ordered = sorted(Stage, key=lambda s: STAGE_ORDER[s])
+    built = [s for s in ordered if STAGE_ORDER[s] <= STAGE_ORDER[up_to] and stage_path(ds.id, s).exists()]
+
+    # Track updated output hashes so downstream manifest inputs stay in sync.
+    current_hash: dict[Stage, str] = {}
+
+    # --- SMILES ---
+    smiles_path = stage_path(ds.id, Stage.SMILES)
+    df = pd.read_csv(smiles_path)
+    df_filtered = df[~df["id"].astype(str).isin(blacklisted)]
+    removed = len(df) - len(df_filtered)
+    if removed:
+        df_filtered.to_csv(smiles_path, index=False)
+        if verbose:
+            print(f"  [{ds.id}:smiles] sync: removed {removed} blacklisted molecule(s)")
+    current_hash[Stage.SMILES] = hash_file(smiles_path)
+    _patch_manifest(smiles_path, current_hash[Stage.SMILES], len(df_filtered))
+
+    # --- CONFORMERS ---
+    if Stage.CONFORMERS in built:
+        conf_path = stage_path(ds.id, Stage.CONFORMERS)
+        with open(conf_path, "rb") as f:
+            confs: dict = pickle.load(f)
+        confs_filtered = {k: v for k, v in confs.items() if k not in blacklisted}
+        removed = len(confs) - len(confs_filtered)
+        if removed:
+            with open(conf_path, "wb") as f:
+                pickle.dump(confs_filtered, f)
+            if verbose:
+                print(f"  [{ds.id}:conformers] sync: removed {removed} blacklisted molecule(s)")
+        current_hash[Stage.CONFORMERS] = hash_file(conf_path)
+        _patch_manifest(
+            conf_path,
+            current_hash[Stage.CONFORMERS],
+            len(confs_filtered),
+            new_inputs={"smiles_output_hash": current_hash[Stage.SMILES]},
+        )
+
+    # --- ELEKTRONN_COEFFS ---
+    if Stage.ELEKTRONN_COEFFS in built:
+        elec_path = stage_path(ds.id, Stage.ELEKTRONN_COEFFS)
+        with open(elec_path, "rb") as f:
+            elec: dict = pickle.load(f)
+        keep = set(elec["coefficients"].keys()) - blacklisted
+        removed = len(elec["coefficients"]) - len(keep)
+        if removed:
+            elec_filtered = {key: {mid: arr for mid, arr in sub.items() if mid in keep} for key, sub in elec.items()}
+            with open(elec_path, "wb") as f:
+                pickle.dump(elec_filtered, f)
+            if verbose:
+                print(f"  [{ds.id}:elektronn_coeffs] sync: removed {removed} blacklisted molecule(s)")
+        current_hash[Stage.ELEKTRONN_COEFFS] = hash_file(elec_path)
+        _patch_manifest(
+            elec_path,
+            current_hash[Stage.ELEKTRONN_COEFFS],
+            len(keep),
+            new_inputs={"conformers_output_hash": current_hash[Stage.CONFORMERS]},
+        )
+
+
 def build_up_to(ds: Dataset, target: Stage, verbose: bool = True) -> None:
-    """Build or rebuild all stages up to and including `target`."""
+    """Build or rebuild all stages up to and including `target`, then sync the blacklist."""
     for stage in sorted(Stage, key=lambda s: STAGE_ORDER[s]):
         if STAGE_ORDER[stage] > STAGE_ORDER[target]:
-            return
+            break
         out = stage_path(ds.id, stage)
         expected_version = _stage_version(ds, stage)
         expected_inputs = _stage_inputs(ds, stage)
@@ -158,3 +254,4 @@ def build_up_to(ds: Dataset, target: Stage, verbose: bool = True) -> None:
         if verbose:
             print(f"  [{ds.id}:{stage.value}] rebuilding...")
         _build_stage(ds, stage)
+    _sync_blacklisted(ds, target, verbose)

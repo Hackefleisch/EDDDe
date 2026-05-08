@@ -1,6 +1,6 @@
 import argparse
 
-from .data import conformers, elektronn_runner
+from .data import conformers, elektronn_runner, pipeline
 from .runner import main
 
 
@@ -30,6 +30,21 @@ def _parse_args() -> argparse.Namespace:
             f"(default: cpu_count = {conformers.N_WORKERS})."
         ),
     )
+    p.add_argument(
+        "--test-mode",
+        action="store_true",
+        help=(
+            "Dev acceleration: randomly downsample every dataset's SMILES stage "
+            "to at most --test-size rows (seeded with the project SEED). "
+            "Cache invalidates against full-mode artifacts when toggled."
+        ),
+    )
+    p.add_argument(
+        "--test-size",
+        type=int,
+        default=1000,
+        help="Max rows per dataset under --test-mode (default: 1000).",
+    )
     return p.parse_args()
 
 
@@ -37,5 +52,7 @@ args = _parse_args()
 elektronn_runner.BATCH_SIZE = args.batch_size
 elektronn_runner.NUM_WORKERS = args.dataloader_workers
 conformers.N_WORKERS = args.conformer_workers
+if args.test_mode:
+    pipeline.TEST_MODE_SIZE = args.test_size
 
 main()

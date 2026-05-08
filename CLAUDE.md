@@ -105,11 +105,11 @@ results/EXP-X/{method_id}/{dataset_id}/metrics.json
 - Datasets lose any molecule with Br, I, P, B, Si, etc. (e.g. S6 drops bromobenzene, S8 drops 4-bromobenzoic acid). Log lines like `[S6:smiles] dropped 1 molecule(s) with unsupported atoms: s6_Br` appear at build time.
 - **M-HALO-ORDER is dropped from EXP-2** (defined on F/Cl/Br; only F and Cl remain).
 - When adding large real-world datasets (D3–D9) the drop rate may be non-trivial; revisit whether the filter should become per-dataset-opt-out before those experiments land.
-- The filter lives in [eddde/data/pipeline.py](eddde/data/pipeline.py) (`_filter_unsupported_atoms`); bump `SMILES_FILTER_VERSION` there to invalidate all cached SMILES CSVs when the supported set changes.
+- The filter lives in [eddde/data/pipeline.py](eddde/data/pipeline.py) (`_filter_and_normalize`, runs in a multiprocessing pool together with salt-stripping and the heavy-atom check); bump `SMILES_FILTER_VERSION` there to invalidate all cached SMILES CSVs when the supported set changes.
 
 **SMILES-stage minimum-heavy-atom filter.** The SMILES stage also drops any molecule with fewer than `MIN_HEAVY_ATOMS` heavy atoms (currently **3**). Several baselines either error or produce degenerate output on tiny molecules: B9/B10 (USR, USRCAT) require ≥3 heavy atoms in RDKit; B6 (topological torsion) needs ≥4-atom paths; B11 (eSim) and B14 (Chemprop D-MPNN) degenerate on near-empty 3D shapes / edgeless graphs. Filtering at the dataset level keeps the "every method sees the same molecules" invariant intact instead of scattering per-method guards. Consequences:
 - S1 loses methane and ethane; S2 loses methanol; S4 loses methylamine. Series stay long enough (10–11 points) for M-MONO/M-SMOOTH/M-LIN.
-- The filter lives in [eddde/data/pipeline.py](eddde/data/pipeline.py) (`_filter_too_small_molecules`, `MIN_HEAVY_ATOMS`); bump `SMILES_FILTER_VERSION` to invalidate caches when changing the floor.
+- The filter lives in [eddde/data/pipeline.py](eddde/data/pipeline.py) (`_filter_and_normalize`, `MIN_HEAVY_ATOMS`); bump `SMILES_FILTER_VERSION` to invalidate caches when changing the floor.
 
 ## Helper Scripts
 

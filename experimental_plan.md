@@ -89,11 +89,13 @@ The MUT family takes the `(n_atoms, 127)` coefficient matrix produced by Elektro
 
 **Molecule sets (construct all from SMILES using RDKit):**
 
-1. **n-Alkanes:** methane through n-dodecane (C1–C12). 12 molecules.
-2. **n-Alkanols:** methanol through 1-dodecanol. 12 molecules.
+1. **n-Alkanes:** methane through n-dodecane (C1–C12). 12 generated → **10** after filter (methane and ethane drop).
+2. **n-Alkanols:** methanol through 1-dodecanol. 12 generated → **11** after filter (methanol drops).
 3. **n-Alkanoic acids:** formic acid through dodecanoic acid. 12 molecules.
-4. **n-Alkylamines:** methylamine through dodecylamine. 12 molecules.
+4. **n-Alkylamines:** methylamine through dodecylamine. 12 generated → **11** after filter (methylamine drops).
 5. **Polyethylene glycols:** HO-(CH₂CH₂O)ₙ-H, n = 1–10. 10 molecules.
+
+The drops above come from a project-wide minimum-heavy-atom filter (MIN_HEAVY_ATOMS = 3) applied at the SMILES stage. Several baselines either error (B9/B10 USR family require ≥3 heavy atoms in RDKit) or degenerate (B6 topological torsion needs ≥4-atom paths; B11 eSim and B14 Chemprop on near-empty 3D shapes / edgeless graphs) on tiny molecules. Filtering at the dataset level keeps every method on the same molecule set rather than scattering per-method guards. The remaining 10–12 points per series are sufficient for the monotonicity, smoothness, and linearity metrics. See CLAUDE.md §"SMILES-stage minimum-heavy-atom filter".
 
 **Procedure:**
 

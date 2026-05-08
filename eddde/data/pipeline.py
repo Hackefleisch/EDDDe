@@ -23,7 +23,13 @@ from . import conformers, elektronn_runner
 from .base import STAGE_ORDER, Dataset, Stage, dataset_size, stage_path
 
 # Bump to invalidate every cached SMILES CSV project-wide (cascades to downstream stages).
-SMILES_FILTER_VERSION = "v2-elements-saltstripped"
+SMILES_FILTER_VERSION = "v3-elements-saltstripped-minheavy3"
+
+# Heavy-atom floor for the project-wide filter. Molecules below this are dropped
+# before any downstream stage runs. Several baselines (B9/B10 USR family) require
+# >= 3 heavy atoms; B6 topological torsion needs >= 4-atom paths and others
+# (B11 eSim, B14 Chemprop) degenerate on tiny graphs. See CLAUDE.md.
+MIN_HEAVY_ATOMS = 3
 
 
 def _strip_salts(csv: Path, ds_id: str) -> None:
@@ -85,6 +91,36 @@ def _filter_unsupported_atoms(csv: Path, ds_id: str) -> None:
     df[keep].to_csv(csv, index=False)
 
 
+def _filter_too_small_molecules(csv: Path, ds_id: str) -> None:
+    """Drop rows whose heavy-atom count is below MIN_HEAVY_ATOMS.
+
+    Project-wide hard filter: keeps the molecule set fair across methods and
+    pre-empts errors / degenerate output from baselines that require a minimum
+    atom count (USR family, topological torsion, etc.). See CLAUDE.md.
+    """
+    import pandas as pd
+    from rdkit import Chem
+
+    df = pd.read_csv(csv)
+    keep = []
+    dropped: list[str] = []
+    for row in df.itertuples(index=False):
+        mol = Chem.MolFromSmiles(row.smiles)
+        if mol is None:
+            keep.append(False)
+            dropped.append(str(row.id))
+            continue
+        n_heavy = mol.GetNumHeavyAtoms()
+        ok = n_heavy >= MIN_HEAVY_ATOMS
+        keep.append(ok)
+        if not ok:
+            dropped.append(str(row.id))
+    if dropped:
+        preview = ", ".join(dropped[:10]) + ("..." if len(dropped) > 10 else "")
+        print(f"  [{ds_id}:smiles] dropped {len(dropped)} molecule(s) with < {MIN_HEAVY_ATOMS} heavy atoms: {preview}")
+    df[keep].to_csv(csv, index=False)
+
+
 def _stage_version(ds: Dataset, stage: Stage) -> str:
     if stage == Stage.SMILES:
         return f"{ds.version}+{SMILES_FILTER_VERSION}"
@@ -123,6 +159,7 @@ def _build_stage(ds: Dataset, stage: Stage) -> None:
             ds.build_smiles(out)
             _strip_salts(out, ds.id)
             _filter_unsupported_atoms(out, ds.id)
+            _filter_too_small_molecules(out, ds.id)
         elif stage == Stage.CONFORMERS:
             smiles = stage_path(ds.id, Stage.SMILES)
             if ds.has_native_conformers:

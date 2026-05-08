@@ -56,12 +56,17 @@ uv pip install -e .
 ## Running
 
 ```bash
-python -m eddde
+python -m eddde                      # full run
+python -m eddde --test-mode          # dev mode: randomly downsample every dataset to ≤1000 mols
+python -m eddde --num-workers 8      # cap the CPU process pool (default: cpu_count)
+python -m eddde --batch-size 16      # smaller GPU batch if ElektroNN OOMs
 ```
 
 The runner checks every stage, embedding, and experiment result for staleness and runs only what needs updating. Adding a new method, dataset, or experiment and re-running produces incremental results without touching anything already cached.
 
-**Compute expectations.** A cold run (no caches) on the full dataset suite can take up to a day. Conformer generation is parallelised across all available CPU cores (`os.cpu_count()` workers in [eddde/data/conformers.py](eddde/data/conformers.py)), but it is still the dominant cost on large datasets. ElektroNN inference runs on GPU when available; the default `BATCH_SIZE = 32` in [eddde/data/elektronn_runner.py](eddde/data/elektronn_runner.py) requires roughly 6 GB of GPU memory — lower it if you hit OOM, raise it if you have headroom.
+**CLI flags.** `--batch-size N` controls ElektroNN's GPU batch size (default 32). `--dataloader-workers N` controls torch DataLoader workers for ElektroNN inference (default 0). `--num-workers N` controls the multiprocessing pool used for SMILES filtering and conformer generation (default = `cpu_count`). `--test-mode` (with optional `--test-size N`, default 1000) randomly downsamples every dataset at the SMILES stage — seeded with the project SEED so the sample is stable across runs and downstream caches don't rebuild on every test invocation. Toggling test-mode ↔ full-mode invalidates the SMILES cache, so pick a mode and stay in it for fast iteration.
+
+**Compute expectations.** A cold run (no caches) on the full dataset suite can take up to a day. Conformer generation and the project-wide SMILES filters are parallelised across `eddde.N_WORKERS` (defaults to `os.cpu_count()`, defined in [eddde/__init__.py](eddde/__init__.py) and overridable via `--num-workers`), but conformer generation remains the dominant cost on large datasets. ElektroNN inference runs on GPU when available; the default `BATCH_SIZE = 32` in [eddde/data/elektronn_runner.py](eddde/data/elektronn_runner.py) requires roughly 6 GB of GPU memory — lower it if you hit OOM, raise it if you have headroom.
 
 ---
 

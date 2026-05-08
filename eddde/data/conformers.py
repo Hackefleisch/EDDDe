@@ -14,7 +14,6 @@ optimisation scale linearly with cores.
 from __future__ import annotations
 
 import multiprocessing
-import os
 import pickle
 from pathlib import Path
 
@@ -23,13 +22,13 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from tqdm import tqdm
 
+import eddde
 from .. import SEED
 
 
 VERSION = "etkdgv3-mmff94-n5-lowest-energy-v1"
 N_CONFS = 5
 PRUNE_RMS_THRESH = 0.5
-N_WORKERS = os.cpu_count() or 1
 
 
 def _keep_lowest_energy_conformer(mol: Chem.Mol) -> Chem.Mol:
@@ -70,7 +69,7 @@ def generate(smiles_csv: Path, out: Path) -> None:
     skipped: list[str] = []
 
     if items:
-        n_workers = max(1, min(N_WORKERS, len(items)))
+        n_workers = max(1, min(eddde.N_WORKERS, len(items)))
         with multiprocessing.Pool(n_workers) as pool:
             with tqdm(total=len(items), desc="conformers", unit="mol") as pbar:
                 for mol_id, mol in pool.imap_unordered(_embed_one, items, chunksize=1):

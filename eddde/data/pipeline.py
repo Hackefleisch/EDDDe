@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import eddde
 from .. import SEED
 from ..cache import (
     Manifest,
@@ -107,7 +108,7 @@ def _filter_and_normalize(csv: Path, ds_id: str) -> None:
 
     items = list(enumerate(df["smiles"].tolist()))
     supported = frozenset(elektronn_runner.supported_elements())
-    n_workers = max(1, min(conformers.N_WORKERS, n))
+    n_workers = max(1, min(eddde.N_WORKERS, n))
 
     new_smiles = list(df["smiles"])
     keep = [True] * n

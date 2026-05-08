@@ -32,6 +32,16 @@ python -m eddde   # run the pipeline
 
 Current dependencies ([pyproject.toml](pyproject.toml)): `numpy`, `scipy`, `pandas`, `rdkit`, `matplotlib`, `tqdm`, `ipykernel`, `elektronn`. Additional deps (e.g. `scikit-learn`, `pot`, `dscribe`, `mmpdb`) will be added as specific experiments are implemented — add them to `pyproject.toml`, don't silently assume they are present.
 
+**Project-wide constants** live at the package root in [eddde/__init__.py](eddde/__init__.py):
+- `SEED = 0xEDDDE` — used by every component that needs deterministic randomness (conformer embedding, test-mode downsampling, etc.) so reruns are reproducible and content-hashes stay stable.
+- `N_WORKERS = os.cpu_count() or 1` — process-pool size for CPU-bound stages (SMILES filtering and conformer generation). Consumers read it as `eddde.N_WORKERS` at call time so the CLI override (`--num-workers`) propagates to every stage.
+
+**CLI flags** ([eddde/__main__.py](eddde/__main__.py)):
+- `--batch-size N` — ElektroNN GPU batch size (default 32).
+- `--dataloader-workers N` — torch DataLoader workers for ElektroNN inference (default 0).
+- `--num-workers N` — process pool size for SMILES filtering and conformer generation (default = `cpu_count`). Mutates `eddde.N_WORKERS`.
+- `--test-mode` (with optional `--test-size N`, default 1000) — dev acceleration. Randomly downsamples every dataset's SMILES stage to ≤N rows after the project-wide filters, seeded with `eddde.SEED`. The downsample size and seed are appended to the SMILES stage version, so test-mode and full-mode artifacts invalidate each other when toggled — pick one mode and stay in it for cache reuse. See [eddde/data/pipeline.py](eddde/data/pipeline.py) (`TEST_MODE_SIZE`, `_downsample_for_test_mode`).
+
 No test suite, linter, or formatter is configured. Don't invent lint/test commands; ask first if one is needed.
 
 ## Code Architecture

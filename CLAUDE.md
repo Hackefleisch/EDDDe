@@ -55,7 +55,7 @@ No test suite, linter, or formatter is configured. Don't invent lint/test comman
 
 "Stale" means the producer's `version` string or any upstream artifact's content hash has changed since the manifest was written. Cascades automatically: bumping `conformers.VERSION` invalidates every downstream artifact for all datasets without native conformers.
 
-If any method needs `Stage.ELEKTRONN_COEFFS`, `main()` pre-warms the ElektroNN model singleton before the dataset loop so that model-weight loading (≈12 s on CPU) is excluded from per-dataset timing. The singleton lives in `_MODEL_CACHE` inside `elektronn_runner` for the duration of the process.
+When `pipeline._build_stage` is about to (re)build a dataset's `Stage.ELEKTRONN_COEFFS`, it calls `elektronn_runner.prewarm()` *outside* the `timed()` block so the ~12 s weight load is excluded from `compute_time`. `prewarm()` is idempotent (the model lives in `_MODEL_CACHE` inside `elektronn_runner` for the duration of the process), so only the first stale dataset pays the load cost. If every dataset's elektronn coeffs are already fresh, the model is never loaded — runs that just shuffle methods and experiments around cached coeffs start instantly.
 
 ### Caching ([eddde/cache.py](eddde/cache.py))
 

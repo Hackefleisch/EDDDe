@@ -254,11 +254,6 @@ def _write_summary_md(method_ids: list[str]) -> None:
 def main() -> None:
     max_stage = _max_needed_stage()
 
-    if STAGE_ORDER[max_stage] >= STAGE_ORDER[Stage.ELEKTRONN_COEFFS]:
-        from .data import elektronn_runner
-        print("Pre-loading ElektroNN weights (one-off, excluded from per-dataset timing)...")
-        elektronn_runner.prewarm()
-
     print("=== Dataset stages ===")
     for ds_id, ds in DATASETS.items():
         print(f"[{ds_id}] target stage: {max_stage.value}")

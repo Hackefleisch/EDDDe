@@ -195,6 +195,11 @@ def _upstream_chain_time(ds: Dataset, stage: Stage) -> float:
 def _build_stage(ds: Dataset, stage: Stage) -> None:
     out = stage_path(ds.id, stage)
     out.parent.mkdir(parents=True, exist_ok=True)
+    # Load ElektroNN weights outside the timed block so the ~12 s one-off
+    # weight load doesn't get billed to the first dataset's compute_time.
+    # Idempotent — subsequent datasets pay nothing.
+    if stage == Stage.ELEKTRONN_COEFFS:
+        elektronn_runner.prewarm()
     with timed() as t:
         if stage == Stage.SMILES:
             ds.build_smiles(out)

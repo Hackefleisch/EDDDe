@@ -112,11 +112,11 @@ All experiments produce MUT results and corresponding results for every applicab
 
 - **Type**: internal
 - **Question**: Does distance grow smoothly and monotonically with position along a chemical series?
-- **Molecule sets** (each generated from SMILES):
-  - S1: n-alkanes C1–C12 (12 molecules)
-  - S2: n-alkanols, methanol to 1-dodecanol (12)
+- **Molecule sets** (each generated from SMILES; effective sizes after the project-wide minimum-heavy-atom filter, MIN_HEAVY_ATOMS=3 — see CLAUDE.md):
+  - S1: n-alkanes C1–C12 (**10**, methane and ethane dropped)
+  - S2: n-alkanols, methanol to 1-dodecanol (**11**, methanol dropped)
   - S3: n-alkanoic acids, formic to dodecanoic (12)
-  - S4: n-alkylamines, methylamine to dodecylamine (12)
+  - S4: n-alkylamines, methylamine to dodecylamine (**11**, methylamine dropped)
   - S5: polyethylene glycols HO-(CH₂CH₂O)ₙ-H, n=1–10 (10)
 - **Metrics** (see §6): M-MONO, M-SMOOTH, M-LIN
 - **Expected behavior**:

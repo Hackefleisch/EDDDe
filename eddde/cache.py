@@ -52,6 +52,12 @@ class Manifest:
     timestamp: float = 0.0
     dataset_size: int = 0
     compute_time_per_mol: float = 0.0
+    # Mean wall-clock time of one method.distance(e1, e2) call, measured on a
+    # random sample of pairs after embedding (see runner._benchmark_distance).
+    # 0.0 means "not measured" — older manifests written before this field
+    # existed default to that. Only populated on embedding manifests.
+    distance_time_per_pair: float = 0.0
+    n_pairs_benchmarked: int = 0
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, sort_keys=True)
@@ -93,6 +99,8 @@ def write_manifest(
     compute_time: float,
     dataset_size: int,
     upstream_compute_time: float = 0.0,
+    distance_time_per_pair: float = 0.0,
+    n_pairs_benchmarked: int = 0,
 ) -> Manifest:
     per_mol = compute_time / dataset_size if dataset_size else 0.0
     m = Manifest(
@@ -104,6 +112,8 @@ def write_manifest(
         timestamp=time.time(),
         dataset_size=dataset_size,
         compute_time_per_mol=per_mol,
+        distance_time_per_pair=distance_time_per_pair,
+        n_pairs_benchmarked=n_pairs_benchmarked,
     )
     manifest_path(artifact).write_text(m.to_json())
     return m

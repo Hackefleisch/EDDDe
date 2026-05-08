@@ -67,8 +67,15 @@ def _get_model():
 
 
 def prewarm() -> None:
-    """Load ElektroNN weights once. Safe to call multiple times. Call before
-    any timed pipeline stage so weight-load cost isn't billed per dataset."""
+    """Load ElektroNN weights once. Safe + cheap to call multiple times.
+
+    Call before any `timed()` pipeline stage so the ~12 s weight-load cost
+    isn't billed to a per-dataset `compute_time`. Should be called only when
+    a rebuild is imminent — pipeline._build_stage handles this on the
+    ELEKTRONN_COEFFS branch, so cached-everything runs avoid the load entirely.
+    """
+    if "model" not in _MODEL_CACHE:
+        print("Loading ElektroNN weights (one-off, excluded from per-dataset timing)...")
     _get_model()
 
 

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import eddde
+from .. import SEED
 from ..cache import (
     Manifest,
     hash_file,
@@ -23,71 +25,156 @@ from . import conformers, elektronn_runner
 from .base import STAGE_ORDER, Dataset, Stage, dataset_size, stage_path
 
 # Bump to invalidate every cached SMILES CSV project-wide (cascades to downstream stages).
-SMILES_FILTER_VERSION = "v2-elements-saltstripped"
+SMILES_FILTER_VERSION = "v3-elements-saltstripped-minheavy3"
+
+# Heavy-atom floor for the project-wide filter. Molecules below this are dropped
+# before any downstream stage runs. Several baselines (B9/B10 USR family) require
+# >= 3 heavy atoms; B6 topological torsion needs >= 4-atom paths and others
+# (B11 eSim, B14 Chemprop) degenerate on tiny graphs. See CLAUDE.md.
+MIN_HEAVY_ATOMS = 3
+
+# Test-mode downsampling. When set (via the --test-mode CLI flag in
+# eddde/__main__.py), every dataset's SMILES stage is randomly downsampled to at
+# most TEST_MODE_SIZE rows after the project-wide filters run. Seeded with the
+# project SEED so the sample is stable across runs and downstream caches do not
+# rebuild on every test invocation. The size+seed are appended to the SMILES
+# stage version so test-mode and full-mode artifacts invalidate each other when
+# toggled.
+TEST_MODE_SIZE: int | None = None
 
 
-def _strip_salts(csv: Path, ds_id: str) -> None:
-    """Replace each SMILES with its largest fragment to drop salt counterions.
+# Worker-process state, populated by _filter_init.
+_WORKER_CHEM = None
+_WORKER_CHOOSER = None
+_WORKER_SUPPORTED: frozenset[int] = frozenset()
 
-    Counterions (Na+, Cl-, ...) alter the electron density without biological
-    relevance. Stripping them before _filter_unsupported_atoms prevents
-    molecules with e.g. Na+ counterions from being dropped for the wrong reason.
-    """
-    import pandas as pd
+
+def _filter_init(supported: frozenset[int]) -> None:
+    """Pool initializer: import RDKit + create the salt chooser once per worker."""
+    global _WORKER_CHEM, _WORKER_CHOOSER, _WORKER_SUPPORTED
     from rdkit import Chem
     from rdkit.Chem.MolStandardize import rdMolStandardize
 
-    chooser = rdMolStandardize.LargestFragmentChooser()
-    df = pd.read_csv(csv)
-    modified = 0
-    new_smiles = list(df["smiles"])
-    for i, smi in enumerate(df["smiles"]):
-        mol = Chem.MolFromSmiles(smi)
-        if mol is None:
-            continue
-        largest = chooser.choose(mol)
-        if largest.GetNumAtoms() < mol.GetNumAtoms():
-            new_smiles[i] = Chem.MolToSmiles(largest)
-            modified += 1
-    df["smiles"] = new_smiles
-    if modified:
-        print(f"  [{ds_id}:smiles] stripped salts from {modified} molecule(s)")
-    df.to_csv(csv, index=False)
+    _WORKER_CHEM = Chem
+    _WORKER_CHOOSER = rdMolStandardize.LargestFragmentChooser()
+    _WORKER_SUPPORTED = supported
 
 
-def _filter_unsupported_atoms(csv: Path, ds_id: str) -> None:
-    """Drop rows whose SMILES contains atoms outside ElektroNN's supported basis set.
+def _filter_one(item: tuple[int, str]) -> tuple[int, str | None, str | None, bool]:
+    """Worker: parse SMILES once, run salt-strip + element + heavy-atom checks.
 
-    Project-wide hard filter: ensures every method (SMILES-only baselines and
-    ElektroNN-based MUTs alike) sees the same molecule set. See CLAUDE.md.
+    Returns (idx, new_smiles_or_None, drop_reason_or_None, salts_stripped).
+    drop_reason ∈ {"unparseable", "unsupported", "too_small", None}.
     """
-    import pandas as pd
-    from rdkit import Chem
+    Chem = _WORKER_CHEM
+    chooser = _WORKER_CHOOSER
+    supported = _WORKER_SUPPORTED
+    idx, smi = item
 
-    supported = elektronn_runner.supported_elements()
+    mol = Chem.MolFromSmiles(smi)
+    if mol is None:
+        return idx, None, "unparseable", False
+
+    largest = chooser.choose(mol)
+    stripped = largest.GetNumAtoms() < mol.GetNumAtoms()
+    new_smi = Chem.MolToSmiles(largest) if stripped else smi
+
+    # H is always in the supported set, so heavy atoms alone are sufficient —
+    # skipping AddHs avoids a per-mol allocation.
+    if not all(a.GetAtomicNum() in supported for a in largest.GetAtoms()):
+        return idx, None, "unsupported", stripped
+
+    if largest.GetNumHeavyAtoms() < MIN_HEAVY_ATOMS:
+        return idx, None, "too_small", stripped
+
+    return idx, new_smi, None, stripped
+
+
+def _filter_and_normalize(csv: Path, ds_id: str) -> None:
+    """Salt-strip + drop unsupported elements + drop too-small mols, in one parallel pass.
+
+    Replaces three sequential single-core passes that each parsed every SMILES
+    independently. Behaviour is preserved: same drop set, same logging shape.
+    See CLAUDE.md for the rationale behind each filter.
+    """
+    import multiprocessing
+
+    import pandas as pd
+
     df = pd.read_csv(csv)
-    keep = []
-    dropped: list[str] = []
-    for row in df.itertuples(index=False):
-        mol = Chem.MolFromSmiles(row.smiles)
-        if mol is None:
-            keep.append(False)
-            dropped.append(str(row.id))
-            continue
-        mol_h = Chem.AddHs(mol)
-        ok = all(a.GetAtomicNum() in supported for a in mol_h.GetAtoms())
-        keep.append(ok)
-        if not ok:
-            dropped.append(str(row.id))
-    if dropped:
-        preview = ", ".join(dropped[:10]) + ("..." if len(dropped) > 10 else "")
-        print(f"  [{ds_id}:smiles] dropped {len(dropped)} molecule(s) with unsupported atoms: {preview}")
+    n = len(df)
+    if n == 0:
+        return
+
+    items = list(enumerate(df["smiles"].tolist()))
+    supported = frozenset(elektronn_runner.supported_elements())
+    n_workers = max(1, min(eddde.N_WORKERS, n))
+
+    new_smiles = list(df["smiles"])
+    keep = [True] * n
+    n_stripped = 0
+    drops: dict[str, list[int]] = {"unparseable": [], "unsupported": [], "too_small": []}
+
+    with multiprocessing.Pool(n_workers, initializer=_filter_init, initargs=(supported,)) as pool:
+        for idx, new_smi, reason, stripped in pool.imap_unordered(_filter_one, items, chunksize=500):
+            if stripped:
+                n_stripped += 1
+            if reason is None:
+                new_smiles[idx] = new_smi
+            else:
+                keep[idx] = False
+                drops[reason].append(idx)
+
+    df["smiles"] = new_smiles
+    if n_stripped:
+        print(f"  [{ds_id}:smiles] stripped salts from {n_stripped} molecule(s)")
+
+    def _log_drop(reason: str, message: str) -> None:
+        idxs = drops[reason]
+        if not idxs:
+            return
+        ids = [str(df.iloc[i]["id"]) for i in idxs]
+        preview = ", ".join(ids[:10]) + ("..." if len(ids) > 10 else "")
+        print(f"  [{ds_id}:smiles] {message.format(n=len(ids))}: {preview}")
+
+    _log_drop("unparseable", "dropped {n} molecule(s) with unparseable SMILES")
+    _log_drop("unsupported", "dropped {n} molecule(s) with unsupported atoms")
+    _log_drop("too_small", f"dropped {{n}} molecule(s) with < {MIN_HEAVY_ATOMS} heavy atoms")
+
     df[keep].to_csv(csv, index=False)
+
+
+def _downsample_for_test_mode(csv: Path, ds: Dataset) -> None:
+    """Downsample the SMILES CSV via the dataset's `test_mode_subsample` hook.
+
+    Default policy is uniform random; datasets like WelQrate override to
+    preserve actives so downstream experiments stay meaningful. The chosen
+    policy version is recorded in `_stage_version` so toggling between
+    policies invalidates only the affected dataset's test-mode cache.
+    """
+    import numpy as np
+    import pandas as pd
+
+    if TEST_MODE_SIZE is None:
+        return
+    df = pd.read_csv(csv)
+    if len(df) <= TEST_MODE_SIZE:
+        return
+    rng = np.random.default_rng(SEED)
+    sampled = ds.test_mode_subsample(df, TEST_MODE_SIZE, rng)
+    sampled.to_csv(csv, index=False)
+    print(
+        f"  [{ds.id}:smiles] test-mode: downsampled {len(df)} -> {len(sampled)} "
+        f"(policy={ds.test_mode_version}, seed={SEED})"
+    )
 
 
 def _stage_version(ds: Dataset, stage: Stage) -> str:
     if stage == Stage.SMILES:
-        return f"{ds.version}+{SMILES_FILTER_VERSION}"
+        v = f"{ds.version}+{SMILES_FILTER_VERSION}"
+        if TEST_MODE_SIZE is not None:
+            v += f"+test:{TEST_MODE_SIZE}:{SEED}:{ds.test_mode_version}"
+        return v
     if stage == Stage.CONFORMERS:
         return ds.version if ds.has_native_conformers else conformers.VERSION
     if stage == Stage.ELEKTRONN_COEFFS:
@@ -118,11 +205,16 @@ def _upstream_chain_time(ds: Dataset, stage: Stage) -> float:
 def _build_stage(ds: Dataset, stage: Stage) -> None:
     out = stage_path(ds.id, stage)
     out.parent.mkdir(parents=True, exist_ok=True)
+    # Load ElektroNN weights outside the timed block so the ~12 s one-off
+    # weight load doesn't get billed to the first dataset's compute_time.
+    # Idempotent — subsequent datasets pay nothing.
+    if stage == Stage.ELEKTRONN_COEFFS:
+        elektronn_runner.prewarm()
     with timed() as t:
         if stage == Stage.SMILES:
             ds.build_smiles(out)
-            _strip_salts(out, ds.id)
-            _filter_unsupported_atoms(out, ds.id)
+            _filter_and_normalize(out, ds.id)
+            _downsample_for_test_mode(out, ds)
         elif stage == Stage.CONFORMERS:
             smiles = stage_path(ds.id, Stage.SMILES)
             if ds.has_native_conformers:

@@ -150,6 +150,12 @@ def _ensure_splits(aid: str, split_url: str, split_dir: Path, all_cids: list[int
 
 class _WelQrateBase(Dataset):
     has_native_conformers = False
+    # Test-mode keeps every active and fills the remaining budget with random
+    # inactives, so each scaffold seed retains its full test-active set —
+    # otherwise uniform sampling drops most or all actives (typical hit rate
+    # is ~1/300, so n=1000 leaves ~3 actives in expectation, often zero in
+    # the test split). Bump this string after changing the override logic.
+    test_mode_version = "v2-keep-actives"
 
     _aid: str = ""
     _raw_url: str = ""
@@ -189,6 +195,28 @@ class _WelQrateBase(Dataset):
         df["id"] = df["id"].astype(str)
         df.to_csv(out, index=False)
         print(f"[{aid}] wrote {len(df)} molecules to {out}")
+
+    def test_mode_subsample(self, df, n, rng):
+        if len(df) <= n:
+            return df
+        actives = df[df["activity"] == 1]
+        inactives = df[df["activity"] == 0]
+
+        if len(actives) >= n:
+            # Pathological case: actives alone exceed budget. Sub-sample
+            # actives uniformly — better than keeping zero inactives.
+            idx = rng.choice(len(actives), size=n, replace=False)
+            idx.sort()
+            kept = actives.iloc[idx]
+        else:
+            n_inactives = min(n - len(actives), len(inactives))
+            idx = rng.choice(len(inactives), size=n_inactives, replace=False)
+            idx.sort()
+            kept = pd.concat([actives, inactives.iloc[idx]])
+
+        # Original ordering: actives first then inactives — matches
+        # build_smiles. Sort by original DataFrame index to preserve it.
+        return kept.sort_index()
 
 
 # ---------------------------------------------------------------------------

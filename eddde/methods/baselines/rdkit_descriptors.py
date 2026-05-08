@@ -41,6 +41,12 @@ class RDKitDescriptors:
         return out
 
     def distance(self, e1: Any, e2: Any) -> float:
+        # Promote to float64 before cosine: a few RDKit descriptors (e.g. Ipc) can
+        # take values ~1e30, and squaring them in float32 inside scipy.cosine
+        # overflows (max ~3.4e38). Embeddings stay float32 on disk; the cast is
+        # local to this distance call.
+        e1 = e1.astype(np.float64, copy=False)
+        e2 = e2.astype(np.float64, copy=False)
         norm1, norm2 = np.linalg.norm(e1), np.linalg.norm(e2)
         if norm1 == 0.0 or norm2 == 0.0:
             return 0.0 if np.array_equal(e1, e2) else 1.0

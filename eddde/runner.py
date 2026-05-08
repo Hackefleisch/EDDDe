@@ -35,7 +35,7 @@ from .data.pipeline import build_up_to
 from .experiments import EXPERIMENTS
 from .experiments.base import RESULTS_ROOT, result_dir
 from .methods import METHODS
-from .methods.base import embedding_path, load_embeddings, save_embeddings
+from .methods.base import benchmark_distance, embedding_path, load_embeddings, save_embeddings
 
 
 def _max_needed_stage() -> Stage:
@@ -65,12 +65,28 @@ def _embed_if_stale(method, ds_id: str, stage_data: dict) -> Path:
 
     if not is_stale(path, expected_version, expected_inputs):
         print(f"  [embed {method.id} on {ds_id}] fresh")
+        # One-shot upgrade for manifests written before the distance-time
+        # benchmark existed: run the benchmark on the cached embeddings and
+        # patch the manifest in place. Doesn't invalidate downstream artifacts.
+        em = Manifest.load(manifest_path(path))
+        if em and em.n_pairs_benchmarked == 0:
+            emb = load_embeddings(path)
+            dist_per_pair, n_pairs = benchmark_distance(method, emb)
+            if n_pairs:
+                em.distance_time_per_pair = dist_per_pair
+                em.n_pairs_benchmarked = n_pairs
+                manifest_path(path).write_text(em.to_json())
+                print(f"    benchmarked: {dist_per_pair*1e6:.1f} µs/pair (n={n_pairs})")
         return path
 
     print(f"  [embed {method.id} on {ds_id}] computing...")
     with timed() as t:
         emb = method.embed_dataset(stage_data)
     save_embeddings(path, emb)
+
+    dist_per_pair, n_pairs = benchmark_distance(method, emb)
+    if n_pairs:
+        print(f"  [embed {method.id} on {ds_id}] distance: {dist_per_pair*1e6:.1f} µs/pair (n={n_pairs})")
 
     stage_m = Manifest.load(manifest_path(stage_file))
     upstream = stage_m.chain_time() if stage_m else 0.0
@@ -81,6 +97,8 @@ def _embed_if_stale(method, ds_id: str, stage_data: dict) -> Path:
         compute_time=t["seconds"],
         upstream_compute_time=upstream,
         dataset_size=dataset_size(ds_id),
+        distance_time_per_pair=dist_per_pair,
+        n_pairs_benchmarked=n_pairs,
     )
     return path
 
@@ -121,6 +139,7 @@ def _write_summary_md(method_ids: list[str]) -> None:
 
     all_avg_ranks: dict[str, list[float]] = {m: [] for m in method_ids}
     all_time_per_mol: dict[str, list[float]] = {m: [] for m in method_ids}
+    all_time_per_pair: dict[str, list[float]] = {m: [] for m in method_ids}
 
     for exp_id, exp in EXPERIMENTS.items():
         if not hasattr(exp, "collect_results") or not hasattr(exp, "metric_direction"):
@@ -202,20 +221,24 @@ def _write_summary_md(method_ids: list[str]) -> None:
 
         sorted_methods = sorted(method_ids, key=lambda m: exp_avg_rank.get(m, float("nan")))
 
-        # --- Per-method end-to-end time per molecule (chain time of the
-        # experiment manifest, averaged across this experiment's datasets). ---
+        # --- Per-method end-to-end time per molecule + per-pair distance time ---
         time_per_mol: dict[str, list[float]] = {m: [] for m in method_ids}
+        time_per_pair: dict[str, list[float]] = {m: [] for m in method_ids}
         for m_id in method_ids:
             for ds_id in exp.datasets:
                 marker = result_dir(exp_id, m_id, ds_id) / "metrics.json"
                 em = Manifest.load(manifest_path(marker))
                 if em and em.dataset_size:
                     time_per_mol[m_id].append(em.chain_time_per_mol())
+                emb_m = Manifest.load(manifest_path(embedding_path(m_id, ds_id)))
+                if emb_m and emb_m.n_pairs_benchmarked:
+                    time_per_pair[m_id].append(emb_m.distance_time_per_pair)
             all_time_per_mol[m_id].extend(time_per_mol[m_id])
+            all_time_per_pair[m_id].extend(time_per_pair[m_id])
 
         # Build markdown table
         lines.append(f"\n## {exp_id}\n")
-        header_cols = ["Method"] + [f"{m}" for m in metrics] + ["Avg rank", "s/mol"]
+        header_cols = ["Method"] + [f"{m}" for m in metrics] + ["Avg rank", "s/mol", "s/pair"]
         lines.append("| " + " | ".join(header_cols) + " |")
         lines.append("| " + " | ".join(["---"] * len(header_cols)) + " |")
 
@@ -225,16 +248,22 @@ def _write_summary_md(method_ids: list[str]) -> None:
             avg_str = f"{avg_r:.2f}" if not np.isnan(avg_r) else "—"
             times = time_per_mol[m_id]
             time_str = f"{float(np.mean(times)):.3g}" if times else "—"
-            lines.append("| " + " | ".join([m_id] + metric_cells + [avg_str, time_str]) + " |")
+            pair_times = time_per_pair[m_id]
+            pair_str = f"{float(np.mean(pair_times)):.3g}" if pair_times else "—"
+            lines.append("| " + " | ".join([m_id] + metric_cells + [avg_str, time_str, pair_str]) + " |")
 
         dir_str = ", ".join(f"{m}({'up' if d > 0 else 'down'})" for m, d in exp.metric_direction.items())
-        lines.append(f"\n*Directions: {dir_str}. s/mol: end-to-end chain time divided by dataset size, averaged across datasets.*\n")
+        lines.append(
+            f"\n*Directions: {dir_str}. "
+            "s/mol: end-to-end chain time divided by dataset size, averaged across datasets. "
+            "s/pair: mean wall-clock per `method.distance(e1, e2)` call from the embedding-stage benchmark.*\n"
+        )
 
     # --- Cross-experiment aggregate ---
     if any(v for v in all_avg_ranks.values()):
         lines.append("\n## Cross-experiment average rank\n")
-        lines.append("| Method | Avg rank (all experiments) | s/mol |")
-        lines.append("| --- | --- | --- |")
+        lines.append("| Method | Avg rank (all experiments) | s/mol | s/pair |")
+        lines.append("| --- | --- | --- | --- |")
         overall: list[tuple[str, float]] = []
         for m_id in method_ids:
             ranks = all_avg_ranks[m_id]
@@ -244,7 +273,9 @@ def _write_summary_md(method_ids: list[str]) -> None:
             avg_str = f"{avg:.2f}" if not np.isnan(avg) else "—"
             times = all_time_per_mol[m_id]
             time_str = f"{float(np.mean(times)):.3g}" if times else "—"
-            lines.append(f"| {m_id} | {avg_str} | {time_str} |")
+            pair_times = all_time_per_pair[m_id]
+            pair_str = f"{float(np.mean(pair_times)):.3g}" if pair_times else "—"
+            lines.append(f"| {m_id} | {avg_str} | {time_str} | {pair_str} |")
 
     RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
     (RESULTS_ROOT / "SUMMARY.md").write_text("\n".join(lines) + "\n")
@@ -253,11 +284,6 @@ def _write_summary_md(method_ids: list[str]) -> None:
 
 def main() -> None:
     max_stage = _max_needed_stage()
-
-    if STAGE_ORDER[max_stage] >= STAGE_ORDER[Stage.ELEKTRONN_COEFFS]:
-        from .data import elektronn_runner
-        print("Pre-loading ElektroNN weights (one-off, excluded from per-dataset timing)...")
-        elektronn_runner.prewarm()
 
     print("=== Dataset stages ===")
     for ds_id, ds in DATASETS.items():

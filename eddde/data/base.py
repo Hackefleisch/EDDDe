@@ -3,6 +3,11 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
+    import pandas as pd
 
 
 class Stage(str, Enum):
@@ -53,6 +58,12 @@ class Dataset:
     version: str = "v1"
     has_native_conformers: bool = False
 
+    # Bump when changing test_mode_subsample logic to invalidate cached
+    # test-mode SMILES files for this dataset only. Full-mode caches are
+    # unaffected because this string is only included in the SMILES stage
+    # version when --test-mode is active.
+    test_mode_version: str = "v1-uniform"
+
     def build_smiles(self, out: Path) -> None:
         raise NotImplementedError(f"{self.id} must implement build_smiles")
 
@@ -61,3 +72,21 @@ class Dataset:
             f"{self.id} declared has_native_conformers=True but did not "
             "implement build_native_conformers"
         )
+
+    def test_mode_subsample(
+        self, df: "pd.DataFrame", n: int, rng: "np.random.Generator"
+    ) -> "pd.DataFrame":
+        """Pick at most `n` rows from the post-filter SMILES dataframe.
+
+        Default: uniform random without replacement. Override to preserve rows
+        the downstream experiments depend on — e.g. WelQrate keeps every active
+        so EXP-3a's retrieval task has at least one query per scaffold seed.
+
+        Bumping `test_mode_version` after changing this method invalidates
+        cached test-mode artifacts for the dataset.
+        """
+        if len(df) <= n:
+            return df
+        idx = rng.choice(len(df), size=n, replace=False)
+        idx.sort()
+        return df.iloc[idx]

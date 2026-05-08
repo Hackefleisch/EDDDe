@@ -153,6 +153,17 @@ def _dcg_at_k(active_ranks, k: int = 100) -> float:
     return sum(1.0 / math.log2(r + 1) for r in active_ranks if r <= k)
 
 
+def _nanmean(values: list[float]) -> float:
+    """Mean ignoring NaN. Returns NaN on empty or all-NaN input.
+
+    Same result as `np.nanmean` but silent on empty-slice — under test-mode
+    (downsampled datasets) some seeds yield zero queries or all-NaN per-query
+    metrics, and the unsuppressed warning storm drowns out real signal.
+    """
+    finite = [x for x in values if not math.isnan(x)]
+    return float(np.mean(finite)) if finite else float("nan")
+
+
 def _mean_se(values: list[float]) -> tuple[float, float]:
     """Mean and standard error, ignoring NaN."""
     v = [x for x in values if not math.isnan(x)]
@@ -161,6 +172,24 @@ def _mean_se(values: list[float]) -> tuple[float, float]:
     m = float(np.mean(v))
     se = float(np.std(v, ddof=1) / math.sqrt(len(v))) if len(v) > 1 else float("nan")
     return m, se
+
+
+# Explicit column lists so empty result CSVs still parse with `pd.read_csv`
+# (in test-mode, some method/dataset pairs produce zero rows).
+_RETRIEVAL_COLS = ("seed", "query_id", "active_id", "rank", "distance", "n_total", "n_actives_in_pool")
+_KNN_COLS = ("seed", "test_id", "test_activity", "neighbor_rank", "neighbor_id", "neighbor_activity", "neighbor_distance")
+
+
+def _read_csv_or_empty(p: Path) -> pd.DataFrame:
+    """Read a CSV, returning an empty DataFrame on zero-byte files.
+
+    Older runs (before _RETRIEVAL_COLS was wired in) wrote 0-byte CSVs for
+    method/dataset pairs with no test-split actives. pd.read_csv raises
+    EmptyDataError on those — this helper hides the difference.
+    """
+    if p.stat().st_size == 0:
+        return pd.DataFrame()
+    return pd.read_csv(p)
 
 
 # ---------------------------------------------------------------------------
@@ -251,10 +280,10 @@ class Exp3aWelQrate:
                 q_ef1.append(_ef_at_percent(active_ranks, n_total, n_actives, percent=1.0))
                 q_dcg100.append(_dcg_at_k(active_ranks, k=100))
 
-            seed_logauc.append(float(np.nanmean(q_logauc)) if q_logauc else float("nan"))
-            seed_bedroc.append(float(np.nanmean(q_bedroc)) if q_bedroc else float("nan"))
-            seed_ef1.append(float(np.nanmean(q_ef1)) if q_ef1 else float("nan"))
-            seed_dcg100.append(float(np.nanmean(q_dcg100)) if q_dcg100 else float("nan"))
+            seed_logauc.append(_nanmean(q_logauc))
+            seed_bedroc.append(_nanmean(q_bedroc))
+            seed_ef1.append(_nanmean(q_ef1))
+            seed_dcg100.append(_nanmean(q_dcg100))
 
             # ------------------------------------------------------------------
             # Task 2: k-NN classification
@@ -299,8 +328,10 @@ class Exp3aWelQrate:
         # ------------------------------------------------------------------
         # Save raw outputs
         # ------------------------------------------------------------------
-        pd.DataFrame(retrieval_rows).to_csv(out / "retrieval_rankings.csv", index=False)
-        pd.DataFrame(knn_rows).to_csv(out / "knn_neighbors.csv", index=False)
+        pd.DataFrame(retrieval_rows, columns=list(_RETRIEVAL_COLS)).to_csv(
+            out / "retrieval_rankings.csv", index=False)
+        pd.DataFrame(knn_rows, columns=list(_KNN_COLS)).to_csv(
+            out / "knn_neighbors.csv", index=False)
 
         # ------------------------------------------------------------------
         # Aggregate metrics across seeds (mean ± SE)
@@ -325,6 +356,18 @@ class Exp3aWelQrate:
                 sort_keys=True,
             )
         )
+
+        # Triage: silent _nanmean swallows per-seed empties; this single line
+        # surfaces the unusual case where every scaffold seed's test split was
+        # empty (e.g. dataset is too small under test-mode for an unlucky seed,
+        # or a future dataset ships with no test actives).
+        if all(math.isnan(v) for v in seed_logauc):
+            print(
+                f"    [{self.id} x {method.id} on {dataset_id}] "
+                "no test-active queries across any scaffold seed — "
+                "all retrieval metrics NaN"
+            )
+
         return metrics
 
     def collect_results(self, method_ids: list[str]) -> pd.DataFrame:
@@ -394,7 +437,9 @@ class Exp3aWelQrate:
                 p = result_dir(self.id, m_id, ds_id) / "retrieval_rankings.csv"
                 if not p.exists():
                     continue
-                df = pd.read_csv(p)
+                df = _read_csv_or_empty(p)
+                if df.empty:
+                    continue
                 # Average ROC curve over all (seed, query) pairs
                 tpr_grid = np.zeros(200)
                 n_curves = 0
@@ -486,7 +531,9 @@ class Exp3aWelQrate:
                 p = result_dir(self.id, m_id, ds_id) / "retrieval_rankings.csv"
                 if not p.exists():
                     continue
-                df = pd.read_csv(p)
+                df = _read_csv_or_empty(p)
+                if df.empty:
+                    continue
                 recall_grid = np.zeros(200)
                 n_curves = 0
                 for (seed, query_id), grp in df.groupby(["seed", "query_id"]):
@@ -535,7 +582,9 @@ class Exp3aWelQrate:
                 p = result_dir(self.id, m_id, ds_id) / "retrieval_rankings.csv"
                 if not p.exists():
                     continue
-                df = pd.read_csv(p)
+                df = _read_csv_or_empty(p)
+                if df.empty:
+                    continue
                 # Normalise rank by pool size so datasets are comparable
                 normed = (df["rank"] / df["n_total"]).values
                 if len(normed) > 0:

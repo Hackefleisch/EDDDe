@@ -59,7 +59,10 @@ def _pairwise_distances(method, embeddings: dict, mol_ids: list[str]) -> np.ndar
 def _mds_2d(D: np.ndarray) -> np.ndarray:
     from sklearn.manifold import MDS
 
-    mds = MDS(n_components=2, dissimilarity="precomputed", random_state=42, normalized_stress="auto")
+    # n_init=4 pins the current sklearn default; without it, sklearn 1.9+ silently
+    # switches to n_init=1 which would change MDS results between sklearn versions.
+    mds = MDS(n_components=2, dissimilarity="precomputed", random_state=42,
+              normalized_stress="auto", n_init=4)
     return mds.fit_transform(D)
 
 

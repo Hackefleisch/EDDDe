@@ -144,26 +144,36 @@ def _filter_and_normalize(csv: Path, ds_id: str) -> None:
     df[keep].to_csv(csv, index=False)
 
 
-def _downsample_for_test_mode(csv: Path, ds_id: str) -> None:
-    """Randomly downsample the SMILES CSV to at most TEST_MODE_SIZE rows."""
+def _downsample_for_test_mode(csv: Path, ds: Dataset) -> None:
+    """Downsample the SMILES CSV via the dataset's `test_mode_subsample` hook.
+
+    Default policy is uniform random; datasets like WelQrate override to
+    preserve actives so downstream experiments stay meaningful. The chosen
+    policy version is recorded in `_stage_version` so toggling between
+    policies invalidates only the affected dataset's test-mode cache.
+    """
     import numpy as np
     import pandas as pd
 
+    if TEST_MODE_SIZE is None:
+        return
     df = pd.read_csv(csv)
-    if TEST_MODE_SIZE is None or len(df) <= TEST_MODE_SIZE:
+    if len(df) <= TEST_MODE_SIZE:
         return
     rng = np.random.default_rng(SEED)
-    idx = rng.choice(len(df), size=TEST_MODE_SIZE, replace=False)
-    idx.sort()  # preserve original ordering for readability
-    df.iloc[idx].to_csv(csv, index=False)
-    print(f"  [{ds_id}:smiles] test-mode: downsampled {len(df)} -> {TEST_MODE_SIZE} (seed={SEED})")
+    sampled = ds.test_mode_subsample(df, TEST_MODE_SIZE, rng)
+    sampled.to_csv(csv, index=False)
+    print(
+        f"  [{ds.id}:smiles] test-mode: downsampled {len(df)} -> {len(sampled)} "
+        f"(policy={ds.test_mode_version}, seed={SEED})"
+    )
 
 
 def _stage_version(ds: Dataset, stage: Stage) -> str:
     if stage == Stage.SMILES:
         v = f"{ds.version}+{SMILES_FILTER_VERSION}"
         if TEST_MODE_SIZE is not None:
-            v += f"+test:{TEST_MODE_SIZE}:{SEED}"
+            v += f"+test:{TEST_MODE_SIZE}:{SEED}:{ds.test_mode_version}"
         return v
     if stage == Stage.CONFORMERS:
         return ds.version if ds.has_native_conformers else conformers.VERSION
@@ -204,7 +214,7 @@ def _build_stage(ds: Dataset, stage: Stage) -> None:
         if stage == Stage.SMILES:
             ds.build_smiles(out)
             _filter_and_normalize(out, ds.id)
-            _downsample_for_test_mode(out, ds.id)
+            _downsample_for_test_mode(out, ds)
         elif stage == Stage.CONFORMERS:
             smiles = stage_path(ds.id, Stage.SMILES)
             if ds.has_native_conformers:

@@ -71,7 +71,7 @@ def _hide_unused(axes_flat, n_used: int) -> None:
 
 class Exp1Homologous:
     id = "EXP-1"
-    version = "v6-more-plots"
+    version = "v7-skip-missing"
     datasets = ["S1", "S2", "S3", "S4", "S5"]
 
     def run(self, method, stage_data, embeddings, dataset_id, out):
@@ -81,9 +81,19 @@ class Exp1Homologous:
         mol_ids = [str(row.id) for row in df.itertuples(index=False)]
         positions = [int(row.position) for row in df.itertuples(index=False)]
 
+        # Methods may produce no embedding for some molecules (e.g. B9/USR
+        # cannot represent fewer than 3 heavy atoms). Such molecules are
+        # excluded from this method's evaluation; other methods on the same
+        # dataset are unaffected because they have full embedding dicts.
+        present = set(embeddings.keys())
+        n_total = len(mol_ids)
+        n_present = sum(1 for m in mol_ids if m in present)
+
         # All pairs — used for M-MONO and mono_scatter plot
         rows = []
         for a, b in combinations(df.itertuples(index=False), 2):
+            if str(a.id) not in present or str(b.id) not in present:
+                continue
             d = method.distance(embeddings[str(a.id)], embeddings[str(b.id)])
             rows.append(
                 {
@@ -93,37 +103,58 @@ class Exp1Homologous:
                     "distance": float(d),
                 }
             )
-        pairs = pd.DataFrame(rows)
+        pairs = pd.DataFrame(rows, columns=["a", "b", "gap", "distance"])
         out.mkdir(parents=True, exist_ok=True)
         pairs.to_csv(out / "pairs.csv", index=False)
 
-        rho, p = spearmanr(pairs["gap"], pairs["distance"])
+        if len(pairs) >= 2:
+            rho, p = spearmanr(pairs["gap"], pairs["distance"])
+        else:
+            rho, p = float("nan"), float("nan")
 
-        # Consecutive distances d(k, k+1) — used for M-SMOOTH and consecutive plot
-        consec = [
-            method.distance(embeddings[mol_ids[i]], embeddings[mol_ids[i + 1]])
-            for i in range(len(mol_ids) - 1)
-        ]
-        pd.DataFrame({"k": positions[:-1], "distance": consec}).to_csv(
+        # Consecutive distances d(k, k+1) — used for M-SMOOTH and consecutive plot.
+        # Only emit a step where both endpoints are embedded.
+        consec_rows = []
+        for i in range(len(mol_ids) - 1):
+            if mol_ids[i] not in present or mol_ids[i + 1] not in present:
+                continue
+            d = method.distance(embeddings[mol_ids[i]], embeddings[mol_ids[i + 1]])
+            consec_rows.append({"k": positions[i], "distance": float(d)})
+        pd.DataFrame(consec_rows, columns=["k", "distance"]).to_csv(
             out / "consecutive.csv", index=False
         )
+        consec = [r["distance"] for r in consec_rows]
 
-        # Distances from first molecule d(mol_1, mol_k) — used for M-LIN and from_first plot
-        from_first = [
-            method.distance(embeddings[mol_ids[0]], embeddings[mol_ids[k]])
-            for k in range(1, len(mol_ids))
-        ]
-        pd.DataFrame({"position": positions[1:], "distance": from_first}).to_csv(
+        # Distances from first molecule d(mol_1, mol_k) — used for M-LIN and
+        # from_first plot. Anchor must be embeddable; otherwise the metric is
+        # undefined for this method/dataset and we emit no rows.
+        from_first_rows = []
+        if mol_ids[0] in present:
+            for k in range(1, len(mol_ids)):
+                if mol_ids[k] not in present:
+                    continue
+                d = method.distance(embeddings[mol_ids[0]], embeddings[mol_ids[k]])
+                from_first_rows.append({"position": positions[k], "distance": float(d)})
+        pd.DataFrame(from_first_rows, columns=["position", "distance"]).to_csv(
             out / "from_first.csv", index=False
         )
 
-        m_lin, m_lin_p = _m_lin(positions[1:], from_first)
+        if len(from_first_rows) >= 2:
+            m_lin, m_lin_p = _m_lin(
+                [r["position"] for r in from_first_rows],
+                [r["distance"] for r in from_first_rows],
+            )
+        else:
+            m_lin, m_lin_p = float("nan"), float("nan")
+
         metrics = {
             "M-MONO": float(rho),
             "M-MONO_pvalue": float(p),
             "M-SMOOTH": _m_smooth(consec),
             "M-LIN": m_lin,
             "M-LIN_pvalue": m_lin_p,
+            "n_molecules_used": n_present,
+            "n_molecules_total": n_total,
         }
         (out / "metrics.json").write_text(
             json.dumps(
@@ -192,6 +223,8 @@ class Exp1Homologous:
                 if not csv.exists():
                     continue
                 df = pd.read_csv(csv)
+                if df.empty:
+                    continue
                 ax.plot(df["position"], df["distance"], marker="o", markersize=4, label=m_id)
             ax.set_title(SERIES_LABELS.get(ds_id, ds_id))
             ax.set_xlabel("Chain length k")
@@ -213,6 +246,8 @@ class Exp1Homologous:
                 if not csv.exists():
                     continue
                 df = pd.read_csv(csv)
+                if df.empty:
+                    continue
                 ax.scatter(df["gap"], df["distance"], s=10, alpha=0.5, label=m_id)
             ax.set_title(SERIES_LABELS.get(ds_id, ds_id))
             ax.set_xlabel("|i − j|")
@@ -234,6 +269,8 @@ class Exp1Homologous:
                 if not csv.exists():
                     continue
                 df = pd.read_csv(csv)
+                if df.empty:
+                    continue
                 ax.plot(df["k"], df["distance"], marker="o", markersize=4, label=m_id)
             ax.set_title(SERIES_LABELS.get(ds_id, ds_id))
             ax.set_xlabel("Chain length k")

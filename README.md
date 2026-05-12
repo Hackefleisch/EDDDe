@@ -130,17 +130,7 @@ Note: Br-containing molecules are dropped by the element filter (see above), red
 
 Provisional — the analysis pass has not been fully validated yet. Retrieval against the WelQrate scaffold-split pool (valid + test, 5 seeds). Topological fingerprints lead, with B5 (Atom Pair) and B3 (FCFP4) at the top. MUT-mean trails the topology pack on every metric but remains comparable to RDKit descriptors (B7) and USR (B9). Numbers are mean±SE across the 9 targets.
 
-| Method | M-LOGAUC | M-BEDROC20 | M-EF1 | M-AUCROC (k=20) | Avg rank | s/mol |
-| --- | --- | --- | --- | --- | --- | --- |
-| B5 | 0.193±0.010 | 0.365±0.062 | 2.571±0.314 | 0.757±0.020 | 1.43 | 0.0205 |
-| B3 | 0.190±0.010 | 0.361±0.065 | 2.529±0.345 | 0.749±0.023 | 2.43 | 0.0206 |
-| B1 | 0.182±0.005 | 0.353±0.066 | 2.387±0.259 | 0.739±0.018 | 3.57 | 0.0204 |
-| B6 | 0.194±0.011 | 0.365±0.066 | 2.346±0.287 | 0.722±0.020 | 3.57 | 0.0205 |
-| B2 | 0.178±0.004 | 0.344±0.067 | 2.252±0.213 | 0.729±0.018 | 4.86 | 0.0205 |
-| B4 | 0.179±0.008 | 0.343±0.063 | 2.414±0.328 | 0.727±0.021 | 5.14 | 0.0208 |
-| MUT-mean | 0.162±0.007 | 0.307±0.060 | 1.774±0.156 | 0.661±0.021 | 7.29 | 0.0444 |
-| B7 | 0.165±0.006 | 0.292±0.066 | 1.448±0.115 | 0.602±0.025 | 8.00 | 0.029 |
-| B9 | 0.160±0.005 | 0.292±0.066 | 1.400±0.102 | 0.605±0.019 | 8.71 | 0.0345 |
+Table dropped: EXP-3a's k-NN classification task has been removed (see §5.3 of PROJECT_PLAN.md for the rationale), so the previous numbers are stale and the Avg-rank column will refresh once `EXP-3a` is rerun. The qualitative ordering on the retained metrics (M-LOGAUC, M-BEDROC20, M-EF1, M-DCG100) is unchanged.
 
 ### EXP-3b — MUV Retrieval (17 PubChem AIDs)
 
@@ -199,7 +189,7 @@ None of the headline numbers are out of the ordinary for MUV. Pre-MUT-era report
 | **Experiments** | |
 | EXP-1 Homologous series smoothness (M-MONO, M-SMOOTH, M-LIN) | done |
 | EXP-2 Functional group substitution sensitivity (M-HAMMETT-PAIR, M-SILHOUETTE) | done |
-| EXP-3a WelQrate retrieval (M-LOGAUC, M-BEDROC20, M-EF1, M-DCG100, M-AUCROC) | implemented; analysis methods awaiting validation |
+| EXP-3a WelQrate retrieval (M-LOGAUC, M-BEDROC20, M-EF1, M-DCG100) | implemented; analysis methods awaiting validation |
 | EXP-3b MUV retrieval (M-AUCROC, M-BEDROC20, M-EF1; 5 deterministically-seeded random query draws per target) | implemented; first end-to-end run in progress |
 | EXP-3c DUD-E retrieval | **deferred** (see PROJECT_PLAN.md §5.5; revisit at implementation time, discuss at writing time) |
 | EXP-4 Activity cliff sensitivity | pending |

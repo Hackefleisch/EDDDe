@@ -66,7 +66,7 @@ def _m_silhouette(coords_2d: np.ndarray, labels: list[str]) -> float:
 
 class Exp2FunctionalGroup:
     id = "EXP-2"
-    version = "v4-pair-hammett-split-silhouette"
+    version = "v5-pair-hammett-split-silhouette"
     datasets = ["S6", "S7", "S8"]
 
     # Direction: +1 = higher is better, -1 = lower is better.
@@ -93,6 +93,11 @@ class Exp2FunctionalGroup:
         out.mkdir(parents=True, exist_ok=True)
 
         D = pairwise_matrix(method, embeddings, mol_ids, mol_ids)
+        # Symmetrise: methods with intrinsically asymmetric distance (B8's
+        # alignment optimizer fixes one mol and rotates the other, so
+        # d(a,b) != d(b,a)) would otherwise break MDS's symmetry check and
+        # bias the Hammett pair correlation. No-op for symmetric methods.
+        D = 0.5 * (D + D.T)
         pd.DataFrame(D, index=mol_ids, columns=mol_ids).to_csv(out / "pairwise_distances.csv")
 
         metrics: dict = {}

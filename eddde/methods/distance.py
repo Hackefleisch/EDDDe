@@ -10,14 +10,24 @@ whether the method has overridden the batched `Method.distances` default:
      matrix size, and there is no per-pair IPC to amortise.
 
   2. Method only ships per-pair `distance()` (B8 Gaussian shape align;
-     future alignment-style methods) — fan out across
-     `multiprocessing.Pool` when the matrix is big enough to amortise
-     pool overhead (~50_000 pairs), else fall through to the
-     inherited serial-loop `distances()`. Workers receive embeddings
-     once via initializer (broadcast into worker globals), so per-task
-     IPC payload is just an (i, j) index tuple. Assumes `fork` start
-     method (Linux); copy-on-write keeps memory bounded even for the
-     large pools we expect on a cluster.
+     future alignment-style methods) — decide parallelisation by
+     predicted serial time = n_pairs × measured-per-pair-cost, and fan
+     out across `multiprocessing.Pool` when that exceeds the pool-
+     overhead break-even. The per-pair cost comes from one of two
+     places, in priority order:
+       (a) `method._distance_time_per_pair`, set by the runner from
+           the embedding-stage benchmark — either freshly measured on
+           rebuild or read from the embedding manifest on cache hit.
+       (b) An on-the-spot `benchmark_distance` against the embeddings
+           passed in, run iff (a) is absent (e.g. ad-hoc usage outside
+           the runner). Result is stashed back on the method so
+           subsequent calls reuse it.
+     There is no static pair-count fallback — we always have a real
+     per-pair measurement before deciding.
+     Workers receive embeddings once via initializer (broadcast into
+     worker globals), so per-task IPC payload is just an (i, j) index
+     tuple. Assumes `fork` start method (Linux); copy-on-write keeps
+     memory bounded even for the large pools we expect on a cluster.
 
 Memory: only the (queries × candidates) result matrix is held in the
 driver. Pair indices are streamed via a generator into pool.imap so
@@ -39,15 +49,15 @@ from typing import Any
 import numpy as np
 
 import eddde
-from .base import Method
+from .base import Method, benchmark_distance
 
 
-# Threshold below which we skip the worker pool. Tuned for a typical
-# 8 µs/pair fingerprint method: 50 000 pairs at 8 µs ≈ 400 ms serial,
-# competitive with pool overhead. Slow methods (~1 ms/pair) win much
-# earlier, so the threshold biases toward serial for cheap methods
-# without hurting slow ones meaningfully.
-_PARALLEL_THRESHOLD = 50_000
+# Parallelise iff the measured per-pair cost predicts serial time above
+# this budget. ~1 s comfortably covers fork + initializer broadcast for
+# the pool sizes we run at (cpu_count up to ~64) without flipping
+# borderline cases that would lose to serial after chunk-imbalance
+# overhead.
+_PARALLEL_MIN_SERIAL_SECONDS = 1.0
 
 
 # Globals set by `_worker_init` after fork. Workers read these instead
@@ -111,12 +121,14 @@ def pairwise_matrix(
     `Method.distances`:
 
       - Override present (B1-B7, B9, MUT-mean) → call the batched
-        implementation directly.
-      - No override (B8 + future alignment-style methods) → fan out
-        across `multiprocessing.Pool` over `method.distance` if
-        `n_workers > 1` and the matrix has at least
-        `_PARALLEL_THRESHOLD` pairs; else fall through to the
-        inherited serial `distances()` (nested loop over `distance`).
+        implementation directly. The per-pair benchmark is irrelevant
+        and never consulted.
+      - No override (B8 + future alignment-style methods) → use the
+        measured per-pair cost on `method._distance_time_per_pair` to
+        predict serial time and fan out across `multiprocessing.Pool`
+        iff that exceeds `_PARALLEL_MIN_SERIAL_SECONDS`. If no
+        measurement is stashed, run `benchmark_distance` on the
+        embeddings being passed in and stash the result.
 
     `n_workers` defaults to `eddde.N_WORKERS` (the CLI's `--num-workers`
     overrides it). Pass `n_workers=1` to force serial regardless of size.
@@ -134,13 +146,20 @@ def pairwise_matrix(
         M = method.distances(embs_q, embs_c)
         return np.asarray(M, dtype=float).reshape(nq, nc)
 
-    # Otherwise this method only ships per-pair `distance()`. For big
-    # matrices fan out across processes; otherwise let the inherited
-    # default `distances()` (serial nested loop) handle it. The default
-    # is one source of truth for what "serial" means.
+    # Per-pair-only method. Need a measured per-pair cost; either it was
+    # stashed (by the runner from the embedding manifest, or by an
+    # earlier call here), or we measure now on the passed-in embeddings.
+    # Stash either way so subsequent calls reuse it.
     if n_workers is None:
         n_workers = eddde.N_WORKERS
-    if n_workers > 1 and nq * nc >= _PARALLEL_THRESHOLD:
+
+    t_pair = getattr(method, "_distance_time_per_pair", None)
+    if not t_pair:
+        t_pair, n_pairs = benchmark_distance(method, embeddings)
+        if n_pairs:
+            method._distance_time_per_pair = t_pair
+
+    if n_workers > 1 and t_pair and (nq * nc) * t_pair >= _PARALLEL_MIN_SERIAL_SECONDS:
         return _pairwise_parallel(method, embs_q, embs_c, n_workers)
 
     return method.distances(embs_q, embs_c)

@@ -177,8 +177,9 @@ None of the headline numbers are out of the ordinary for MUV. Pre-MUT-era report
 | B1 ECFP4, B2 ECFP6, B3 FCFP4 | done |
 | B4 MACCS keys, B5 Atom Pair, B6 Topological Torsion | done |
 | B7 RDKit 2048-bit 2D descriptors (cosine distance) | done |
+| B8 Gaussian shape + color Tanimoto (RDKit `rdShapeAlign`, ROCS-equivalent) | done |
 | B9 USR (12-d, RDKit, inverse-Manhattan distance) | done |
-| B8 ROCS, B10 USRCAT, B11 eSim, B12 Mol2vec, B13 Uni-Mol, B14 Chemprop | pending |
+| B10 USRCAT, B11 eSim, B12 Mol2vec, B13 Uni-Mol, B14 Chemprop | pending |
 | B15–B17 (QM-descriptor baselines: Coulomb matrix, SOAP, ACSF) | pending |
 | **MUTs** | |
 | MUT-mean (atom-mean → 127-d vector, Euclidean distance) | done |

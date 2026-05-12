@@ -49,6 +49,13 @@ class Method(ABC):
     version: str
     needs: Stage
 
+    # Set by the runner from the embedding-stage benchmark before any
+    # experiment runs. `pairwise_matrix` reads it to predict serial cost
+    # and parallelise only when the predicted time exceeds pool overhead.
+    # None means "no measurement yet" — the static pair-count threshold
+    # is used as a fallback.
+    _distance_time_per_pair: float | None = None
+
     @abstractmethod
     def embed_dataset(self, stage_data: dict) -> dict[str, Any]:
         ...

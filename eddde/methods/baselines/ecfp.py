@@ -6,14 +6,17 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import pandas as pd
-from rdkit import Chem, DataStructs
+from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
 
 from ...data.base import Stage
+from ..base import Method
+from ._bitvec_tanimoto import tanimoto_distance_matrix
 
 
-class _MorganFP:
+class _MorganFP(Method):
     needs = Stage.SMILES
 
     def __init__(self, radius: int) -> None:
@@ -29,8 +32,8 @@ class _MorganFP:
             out[str(row["id"])] = self._gen.GetFingerprint(mol)
         return out
 
-    def distance(self, e1: Any, e2: Any) -> float:
-        return 1.0 - DataStructs.TanimotoSimilarity(e1, e2)
+    def distances(self, embs_q: list[Any], embs_c: list[Any]) -> np.ndarray:
+        return tanimoto_distance_matrix(embs_q, embs_c)
 
 
 class ECFP4(_MorganFP):

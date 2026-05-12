@@ -1,24 +1,23 @@
 """Distance-matrix computation shared by every experiment that needs
 multi-pair `method.distance` calls.
 
-`pairwise_matrix` is the single entry point. It dispatches across three
-implementations depending on the method and dataset size:
+`pairwise_matrix` is the single entry point. Dispatch follows from
+whether the method has overridden the batched `Method.distances` default:
 
-  1. Method-provided batched `distances(embs_q, embs_c) -> ndarray` —
-     for GPU or vectorised CPU kernels. The method handles all internal
-     batching; we call it once and trust the result shape. Today no
-     method overrides this; the hook is here so future learned /
-     OT-style methods can plug in without changing experiments.
+  1. Method overrides `distances()` (B1-B7, B9, MUT-mean today; future
+     GPU / OT methods tomorrow) — call it once and return. A single
+     vectorised C / BLAS / GPU call is the right thing regardless of
+     matrix size, and there is no per-pair IPC to amortise.
 
-  2. multiprocessing.Pool over `method.distance(e1, e2)` — for slow
-     per-pair methods (B8 today, B11 / OT-MUTs tomorrow). Embeddings
-     are bound to worker globals by an initializer so per-task IPC
-     payload is just an (i, j) index tuple. Assumes `fork` start
+  2. Method only ships per-pair `distance()` (B8 Gaussian shape align;
+     future alignment-style methods) — fan out across
+     `multiprocessing.Pool` when the matrix is big enough to amortise
+     pool overhead (~50_000 pairs), else fall through to the
+     inherited serial-loop `distances()`. Workers receive embeddings
+     once via initializer (broadcast into worker globals), so per-task
+     IPC payload is just an (i, j) index tuple. Assumes `fork` start
      method (Linux); copy-on-write keeps memory bounded even for the
      large pools we expect on a cluster.
-
-  3. Serial nested loop — for small matrices or single-worker config.
-     Pool spin-up is ~50–200 ms; below the threshold serial wins.
 
 Memory: only the (queries × candidates) result matrix is held in the
 driver. Pair indices are streamed via a generator into pool.imap so
@@ -40,6 +39,7 @@ from typing import Any
 import numpy as np
 
 import eddde
+from .base import Method
 
 
 # Threshold below which we skip the worker pool. Tuned for a typical
@@ -98,7 +98,7 @@ def _pairwise_parallel(
 
 
 def pairwise_matrix(
-    method: Any,
+    method: Method,
     embeddings: dict[str, Any],
     query_ids: list[str],
     candidate_ids: list[str],
@@ -107,15 +107,19 @@ def pairwise_matrix(
 ) -> np.ndarray:
     """Distance matrix where `M[i, j] = method.distance(emb[query_ids[i]], emb[candidate_ids[j]])`.
 
-    Dispatch (in order):
-      1. `method.distances(embs_q, embs_c)` if the method's class defines it
-         (single batched call — for GPU / vectorised methods).
-      2. `multiprocessing.Pool` over `method.distance` if `n_workers > 1`
-         and the matrix has at least `_PARALLEL_THRESHOLD` pairs.
-      3. Plain serial loop.
+    Dispatch is decided by whether the method overrides
+    `Method.distances`:
 
-    `n_workers` defaults to `eddde.N_WORKERS` (which the CLI's `--num-workers`
-    can override). Pass `n_workers=1` to force serial regardless of size.
+      - Override present (B1-B7, B9, MUT-mean) → call the batched
+        implementation directly.
+      - No override (B8 + future alignment-style methods) → fan out
+        across `multiprocessing.Pool` over `method.distance` if
+        `n_workers > 1` and the matrix has at least
+        `_PARALLEL_THRESHOLD` pairs; else fall through to the
+        inherited serial `distances()` (nested loop over `distance`).
+
+    `n_workers` defaults to `eddde.N_WORKERS` (the CLI's `--num-workers`
+    overrides it). Pass `n_workers=1` to force serial regardless of size.
     """
     nq, nc = len(query_ids), len(candidate_ids)
     if nq == 0 or nc == 0:
@@ -124,21 +128,19 @@ def pairwise_matrix(
     embs_q = [embeddings[q] for q in query_ids]
     embs_c = [embeddings[c] for c in candidate_ids]
 
-    # 1. Method-provided batched implementation (GPU / vectorised).
-    if "distances" in vars(type(method)):
+    # Batched override present → trust it. Vectorised / BLAS / GPU calls
+    # don't benefit from external IPC fanout.
+    if type(method).distances is not Method.distances:
         M = method.distances(embs_q, embs_c)
         return np.asarray(M, dtype=float).reshape(nq, nc)
 
+    # Otherwise this method only ships per-pair `distance()`. For big
+    # matrices fan out across processes; otherwise let the inherited
+    # default `distances()` (serial nested loop) handle it. The default
+    # is one source of truth for what "serial" means.
     if n_workers is None:
         n_workers = eddde.N_WORKERS
-
-    # 2. Multiprocessing pool.
     if n_workers > 1 and nq * nc >= _PARALLEL_THRESHOLD:
         return _pairwise_parallel(method, embs_q, embs_c, n_workers)
 
-    # 3. Serial fallback.
-    M = np.empty((nq, nc), dtype=float)
-    for i in range(nq):
-        for j in range(nc):
-            M[i, j] = method.distance(embs_q[i], embs_c[j])
-    return M
+    return method.distances(embs_q, embs_c)

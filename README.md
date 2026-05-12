@@ -28,12 +28,12 @@ eddde/
     conformers.py            # RDKit ETKDGv3 + MMFF94, lowest-energy single conformer
     elektronn_runner.py      # ElektroNN integration, model cache, supported-element set
     pipeline.py              # build_up_to(dataset, stage), SMILES-stage element filter
-    sources/                 # one file per dataset (S1–S8 + 9 WelQrate AIDs implemented)
+    sources/                 # one file per dataset (S1–S8 + 9 WelQrate AIDs + 17 MUV assays implemented)
   methods/
     base.py                  # Method protocol, embedding cache
     baselines/               # one file per baseline (B1–B7 + B9 USR implemented)
     muts/                    # one file per MUT condensing scheme (MUT-mean implemented)
-  experiments/               # one file per experiment (EXP-1, EXP-2, EXP-3a implemented)
+  experiments/               # one file per experiment (EXP-1, EXP-2, EXP-3a, EXP-3b implemented; retrieval_common.py shared)
 ```
 
 Each cached artifact has a sidecar `*.manifest.json` storing producer version, input hashes, compute time, and accumulated upstream cost — so the full pipeline cost for any result is an O(1) lookup. `results/SUMMARY.md` is regenerated on every run with per-experiment metric tables and a cross-experiment average-rank leaderboard.
@@ -92,7 +92,7 @@ Builds the SMILES stage if needed (cached) and saves a PNG grid to `figures/<dat
 
 ## Current results
 
-Results below are from running EXP-1 and EXP-2 against B1–B7 and MUT-mean. EXP-3a (WelQrate retrieval) is implemented and runs end-to-end against the 9 AID datasets, but its analysis/aggregation code has not yet been validated — no headline numbers are reported here until that pass is done. All results are fully reproducible: `python -m eddde` regenerates them from scratch.
+Results below are from running EXP-1 and EXP-2 against B1–B7 and MUT-mean. EXP-3a (WelQrate retrieval) and EXP-3b (MUV retrieval) are implemented and run end-to-end against their respective datasets (9 WelQrate AIDs / 17 MUV assays), but their analysis/aggregation code has not yet been validated — no headline numbers are reported here until that pass is done. All results are fully reproducible: `python -m eddde` regenerates them from scratch.
 
 ### EXP-1 — Homologous Series Smoothness (S1–S5)
 
@@ -150,12 +150,15 @@ Note: Br-containing molecules are dropped by the element filter (see above), red
 | S7 monosubstituted cyclohexanes (10) | done |
 | S8 para-substituted benzoic acids — Hammett series (9 after element filter) | done |
 | D3 WelQrate (9 PubChem AIDs: AID1798, AID1843, AID2258, AID2689, AID435008, AID435034, AID463087, AID485290, AID488997) with downloader, scaffold splits, blacklist-aware build | done |
-| D4 MUV, D5 DUD-E, D6 MMP-cliffs, D7–D8 bioisosteres, D9 Riniker-Landrum | pending |
+| D4 MUV (17 PubChem AIDs from the RDKit benchmarking_platform: 466, 548, 600, 644, 652, 689, 692, 712, 713, 733, 737, 810, 832, 846, 852, 858, 859) | done |
+| D5 DUD-E | **deferred** (see PROJECT_PLAN.md §5.5) |
+| D6 MMP-cliffs, D7–D8 bioisosteres, D9 Riniker-Landrum | pending |
 | **Experiments** | |
 | EXP-1 Homologous series smoothness (M-MONO, M-SMOOTH, M-LIN) | done |
 | EXP-2 Functional group substitution sensitivity (M-HAMMETT-PAIR, M-SILHOUETTE) | done |
 | EXP-3a WelQrate retrieval (M-LOGAUC, M-BEDROC20, M-EF1, M-DCG100, M-AUCROC) | implemented; analysis methods awaiting validation |
-| EXP-3b MUV retrieval, EXP-3c DUD-E retrieval | pending |
+| EXP-3b MUV retrieval (M-AUCROC, M-BEDROC20, M-EF1; 5 deterministically-seeded random query draws per target) | implemented; first end-to-end run in progress |
+| EXP-3c DUD-E retrieval | **deferred** (see PROJECT_PLAN.md §5.5; revisit at implementation time, discuss at writing time) |
 | EXP-4 Activity cliff sensitivity | pending |
 | EXP-5 Bioisostere recognition (critical hypothesis test) | pending |
 | EXP-6 Scaffold hopping | pending |

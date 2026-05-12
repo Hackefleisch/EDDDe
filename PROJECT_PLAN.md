@@ -92,15 +92,14 @@ MUTs condense the `(n_atoms, 127)` ElektroNN coefficient matrix into a fixed-siz
 | D2 | Custom functional-group substitution sets | EXP-2 | Generated from SMILES; see §5.2 |
 | D3 | WelQrate (9 targets) | EXP-3a | [welqrate.org](https://welqrate.org) / [arXiv:2411.09820](https://arxiv.org/abs/2411.09820) |
 | D4 | MUV (17 targets) | EXP-3b | [Riniker-Landrum benchmarking platform](https://github.com/rdkit/benchmarking_platform); original [Rohrer & Baumann 2009](https://doi.org/10.1021/ci8002649) |
-| D5 | DUD-E (102 targets) | EXP-3c | [dude.docking.org](http://dude.docking.org) / [Mysinger et al. 2012](https://doi.org/10.1021/jm300687e) |
+| D5 | DUD-E (102 targets) — **deferred, see §5.5** | EXP-3c | [dude.docking.org](http://dude.docking.org) / [Mysinger et al. 2012](https://doi.org/10.1021/jm300687e) |
 | D6 | Activity cliff pairs (30 ChEMBL targets) | EXP-4 | **Primary**: MoleculeACE pre-curated data — [github.com/molML/MoleculeACE/tree/main/MoleculeACE/Data/benchmark_data](https://github.com/molML/MoleculeACE/tree/main/MoleculeACE/Data/benchmark_data) / [van Tilborg et al. 2022](https://doi.org/10.1021/acs.jcim.2c01073). **Fallback** (if cliff definition needs to be MMP-only): current ChEMBL release + `mmpdb`; method: [Hu et al. 2012](https://doi.org/10.1021/ci3001138) |
 | D7 | SwissBioisostere replacements | EXP-5a | [swissbioisostere.ch](http://www.swissbioisostere.ch) / [Isert et al. 2022](https://doi.org/10.1093/nar/gkab1047) |
 | D8 | Curated classical bioisostere pairs | EXP-5b | Literature-based list, ~50–100 pairs; seed list from [Meanwell 2011](https://doi.org/10.1021/jm1013693) |
 | D9 | Riniker-Landrum 88-target benchmark | EXP-6 | [github.com/rdkit/benchmarking_platform](https://github.com/rdkit/benchmarking_platform) / [Riniker & Landrum 2013](https://doi.org/10.1186/1758-2946-5-26) |
 
 **Known dataset issues to document in results:**
-- D5 (DUD-E) has analog bias and property shortcuts ([Chen et al. 2019](https://doi.org/10.1371/journal.pone.0220113)). Report full 102-target set AND bias-reduced ~47-target subset from [Lagarde et al. 2015](https://doi.org/10.1021/acs.jcim.5b00090).
-- D5 should be weighted below D3 and D4 in final conclusions.
+- D5 (DUD-E) is **deferred** — see EXP-3c §5.5 for rationale. The known analog bias and property shortcuts ([Chen et al. 2019](https://doi.org/10.1371/journal.pone.0220113)) make D3+D4 a more rigorous test of the same hypothesis at ~25 % of the compute cost. If D5 is later run, report both the full 102-target set and the bias-reduced ~47-target subset from [Lagarde et al. 2015](https://doi.org/10.1021/acs.jcim.5b00090), and weight results below D3 and D4 in final conclusions.
 
 ---
 
@@ -169,7 +168,18 @@ All experiments produce MUT results and corresponding results for every applicab
 - **Expected behavior**: All topological FPs struggle (this is MUV's design purpose). MUT advantage, if real, should show most clearly here.
 - **Success criterion**: MUT's mean AUCROC > 0.7 on majority of targets AND statistically better than best topological FP (Wilcoxon signed-rank, p < 0.05 across 17 targets).
 
-### 5.5 EXP-3c: DUD-E Retrieval
+### 5.5 EXP-3c: DUD-E Retrieval — **DEFERRED**
+
+> **Status: deferred.** Not implemented in the current iteration. Two open actions:
+> 1. **Re-evaluate at implementation time** — revisit only if EXP-3a (WelQrate) and EXP-3b (MUV) results are ambiguous and need a third retrieval data point, or if a specific reviewer/collaborator asks for DUD-E numbers.
+> 2. **Discuss at writing time** — the paper must explicitly justify the omission (or post-hoc inclusion). The "why we did not run DUD-E" paragraph belongs in the methods or limitations section, citing Chen et al. 2019 (analog bias) and Lagarde et al. 2015 (property shortcut) and pointing at EXP-3b as the better-designed replacement.
+>
+> **Deferral rationale.**
+> - D5 has well-documented biases: analog bias ([Chen et al. 2019](https://doi.org/10.1371/journal.pone.0220113)) and property-matching shortcuts that let trivial classifiers succeed.
+> - EXP-3a (curated scaffold-split retrieval) and EXP-3b (analog-bias-free retrieval by design) already test the same hypothesis more rigorously; D5 contributes mostly "literature comparability", a publication-strategy argument rather than a scientific one.
+> - Compute cost is prohibitive: ~1.15 M molecules for the full 102-target set (~530 k for the Lagarde bias-reduced 47-target subset) — 2–4× of D3+D4 combined, dominated by ElektroNN inference.
+>
+> The specification below describes what EXP-3c *would* look like if implemented. Keep it intact so a future contributor (or future-us) can resume without redesign.
 
 - **Type**: external (with caveats)
 - **Question**: Literature-comparable retrieval performance.

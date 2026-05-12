@@ -50,7 +50,7 @@ All baselines must be computed on the same molecule sets as MUT. When applicable
 | B5 | Atom Pair fingerprint | Topological FP | bitvector / Tanimoto | Carhart et al. 1985 |
 | B6 | Topological Torsion fingerprint | Topological FP | bitvector / Tanimoto | Nilakantan et al. 1987 |
 | B7 | RDKit 2D descriptors (~200 descriptors) | Physicochemical | vector / cosine, Euclidean | RDKit `Descriptors` |
-| B8 | ROCS (shape + color Tanimoto) | 3D shape+field | similarity from overlay | [OpenEye ROCS](https://docs.eyesopen.com/applications/rocs/rocs/rocs_overview.html) |
+| B8 | Gaussian shape + color Tanimoto (ROCS-equivalent) | 3D shape+field | combo Tanimoto from overlay | RDKit `rdShapeAlign` (PAPER algorithm, [Grant et al. 1996](https://doi.org/10.1021/jp951631s); BSD-licensed open-source port of the OpenEye ROCS approach) |
 | B9 | USR (12-d) | 3D shape | vector / inverse-Manhattan | Ballester & Richards 2007 |
 | B10 | USRCAT (60-d, pharmacophoric) | 3D shape+pharmacophore | vector / inverse-Manhattan | [Schreyer & Blundell 2012](https://doi.org/10.1186/1758-2946-4-27) |
 | B11 | eSim (electrostatic field + shape) | 3D field | similarity from overlay | [Jain 2020](https://doi.org/10.1007/s10822-019-00236-6) |
@@ -187,7 +187,7 @@ All experiments produce MUT results and corresponding results for every applicab
 - **Protocol**: Per-target retrieval with one active as query; rank remaining actives + decoys. Report on full 102-target set AND on the ~47-target bias-reduced subset.
 - **Metrics**: M-AUCROC, M-BEDROC20, M-EF1, M-LOGAUC
 - **Expected behavior**: All methods perform well on full DUD-E due to property-matching bias. Bias-reduced subset is more informative.
-- **Success criterion**: MUT performance on bias-reduced subset ≥ ROCS (B8) on median AUCROC.
+- **Success criterion**: MUT performance on bias-reduced subset ≥ B8 (Gaussian shape + color Tanimoto) on median AUCROC.
 - **Weighting**: Results here weighted BELOW EXP-3a and EXP-3b due to known biases.
 
 ### 5.6 EXP-4: Activity Cliff Analysis

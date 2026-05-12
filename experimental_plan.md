@@ -35,7 +35,7 @@ All fingerprint-based baselines use Tanimoto similarity unless stated otherwise.
 
 | Method | Description | Tool / Reference |
 |--------|-------------|------------------|
-| **ROCS (Shape + Color Tanimoto)** | Gaussian-based molecular volume overlay. Industry standard for 3D shape comparison. Requires conformer generation. Commercial but widely reported. | OpenEye ROCS. Grant et al., *J. Phys. Chem.* 1996, 100, 11775. Documentation: [docs.eyesopen.com/applications/rocs](https://docs.eyesopen.com/applications/rocs/rocs/rocs_overview.html) |
+| **Gaussian Shape + Color Tanimoto** (B8, ROCS-equivalent) | Gaussian-volume molecular overlay with optional pharmacophore-feature ("color") scoring — the open-source equivalent of OpenEye ROCS. The OpenEye tool is the commercial industry standard for this approach; we use the RDKit port `rdShapeAlign`, which implements the same PAPER Gaussian-overlay algorithm and returns shape and color Tanimoto scores. Distance is `1 − combo Tanimoto` with `opt_param=0.5` (balanced shape/color pose search). Pairwise alignment makes this the slowest baseline by 1–2 orders of magnitude. | Grant et al., *J. Phys. Chem.* 1996, 100, 18503–18506. DOI: [10.1021/jp951631s](https://doi.org/10.1021/jp951631s). Skillman & Hahn PAPER algorithm. Implementation: `rdkit.Chem.rdShapeAlign.AlignShapes` (RDKit ≥2023.09, BSD-licensed). |
 | **USR (Ultrafast Shape Recognition)** | Alignment-free shape descriptor using distributions of atom distances from four reference points. Produces a 12-dimensional vector per molecule. Fast, open-source alternative to ROCS. | Ballester & Richards, *J. Comput. Chem.* 2007, 28, 1711–1723. Implementation available in RDKit `Chem.Descriptors3D.GetUSR`. |
 | **USRCAT** | Extension of USR incorporating pharmacophoric atom-type information (hydrogen bond donors, acceptors, hydrophobic atoms, aromatic atoms). 60-dimensional vector. | Schreyer & Blundell, *J. Cheminform.* 2012, 4, 27. RDKit `Chem.Descriptors3D.GetUSRCAT`. |
 | **Electrostatic similarity (eSim)** | Combines electrostatic field comparison with molecular shape. Relevant since your electron density method is also fundamentally electrostatic. | Jain, *J. Comput. Aided Mol. Des.* 2020, 34, 129–150. DOI: [10.1007/s10822-019-00236-6](https://doi.org/10.1007/s10822-019-00236-6) |
@@ -427,7 +427,7 @@ Rationale: a single minimum-energy conformer is the natural input for QM-derived
 | Mol2vec | github.com/samoturk/mol2vec |
 | Uni-Mol | github.com/deepmodeling/Uni-Mol |
 | Chemprop | github.com/chemprop/chemprop |
-| ROCS | OpenEye toolkit (commercial license required) |
+| Gaussian shape + color Tanimoto (B8, ROCS-equivalent) | RDKit `rdShapeAlign` (open source, BSD) |
 | Statistical analysis | SciPy, scikit-learn |
 | Visualization | matplotlib, seaborn |
 

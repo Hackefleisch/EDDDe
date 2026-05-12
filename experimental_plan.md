@@ -194,29 +194,45 @@ Report mean ± standard error across five scaffold seeds per target.
 **Data source:** 17 datasets from PubChem BioAssay, specifically designed to be free of analog bias and artificial enrichment.
 
 - Paper: Rohrer & Baumann, *J. Chem. Inf. Model.* 2009, 49, 169–184. DOI: [10.1021/ci8002649](https://doi.org/10.1021/ci8002649)
-- Data: Available via the Riniker & Landrum benchmarking platform at [github.com/rdkit/benchmarking_platform](https://github.com/rdkit/benchmarking_platform)
+- Data: Available via the Riniker & Landrum benchmarking platform at [github.com/rdkit/benchmarking_platform](https://github.com/rdkit/benchmarking_platform). Each target ships as a pair of gzipped TSVs (`cmp_list_MUV_<AID>_actives.dat.gz` / `..._decoys.dat.gz`) under `compounds/MUV/`. Fetched per-file via `curl` in [eddde/data/sources/muv.py](eddde/data/sources/muv.py) — no submodule.
 - ~15,000 decoys and 30 actives per target.
 
-**Procedure:** Same retrieval protocol as WelQrate.
+**Procedure.** Unlike WelQrate, MUV has no scaffold split, so the protocol is closer to classical retrospective virtual screening:
 
-**Metrics:** AUC-ROC, BEDROC(α=20), EF₁%.
+1. Per target (= one MUV assay), per query draw:
+   - Pick one random active as query (deterministically seeded — see below).
+   - Rank every other molecule in the target by ascending distance.
+   - Record active ranks and per-query AUC-ROC, BEDROC₂₀, EF₁%.
+2. Repeat over `N_QUERY_DRAWS = 5` seeds. Aggregate per-target as mean ± SE over the 5 seeds. AUC-ROC is computed over the full pool against per-pair labels; BEDROC and EF use the compact active-rank representation.
 
-**Why MUV matters:** MUV datasets are specifically constructed to be challenging for topological similarity methods, with actives that are not structural analogs of each other. If the electron density method succeeds where fingerprints fail, this is strong evidence for capturing functional rather than structural similarity.
+**Seeding.** The five queries per target are drawn from a `numpy` RNG keyed on `sha256("{SEED}|{dataset_id}|{draw_idx}")`. This is stable across machines and processes, so reruns reproduce the same queries (and therefore the same per-seed metric values) regardless of where the pipeline executes.
 
-#### 3c. DUD-E
+**Metrics:** AUC-ROC, BEDROC(α=20), EF₁%. No k-NN classification task (MUV's tiny active count makes it noisier than useful) and no LogAUC (the plan reserves it for EXP-3a's larger pools).
 
-**Data source:** 102 protein targets with 22,886 clustered ligands from ChEMBL, each with 50 property-matched decoys from ZINC.
+**Why MUV matters:** MUV datasets are specifically constructed to be challenging for topological similarity methods, with actives that are not structural analogs of each other. If the electron density method succeeds where fingerprints fail, this is strong evidence for capturing functional rather than structural similarity. This is the experiment where any MUT advantage — if real — should show most clearly, which is why EXP-3c (DUD-E) is currently deferred: 3b tests the same question without DUD-E's known biases.
 
-- Paper: Mysinger et al., *J. Med. Chem.* 2012, 55, 6582–6594. DOI: [10.1021/jm300687e](https://doi.org/10.1021/jm300687e)
-- Data: [dude.docking.org](http://dude.docking.org)
+#### 3c. DUD-E — **deferred**
 
-**Important caveat:** DUD-E has known biases, particularly analog bias and property-based shortcuts that allow trivial classifiers to succeed (Chen et al., *PLOS One* 2019, DOI: [10.1371/journal.pone.0220113](https://doi.org/10.1371/journal.pone.0220113)). It is included for comparability with published literature, but MUV and WelQrate results should be weighted more heavily.
+**Status.** EXP-3c is not implemented in the current iteration. It is preserved here as a specification only, with two explicit open actions:
 
-**Procedure:** For each target, use one active as query. Rank remaining actives + decoys by similarity. Compute per-target metrics and average across targets.
+1. **Implementation decision (later).** Revisit whether to actually run DUD-E. Triggers for revisiting: ambiguous EXP-3a/3b signal that needs a third retrieval data point, or a specific reviewer/collaborator request.
+2. **Writing-time discussion (paper).** The omission must be explicitly addressed in the methods or limitations section. The argument is: DUD-E is the standard retrospective virtual-screening benchmark in the literature, but its analog bias (Chen et al. 2019) and property-matching shortcut (Lagarde et al. 2015) make any positive result attributable in part to artefacts of dataset construction. EXP-3b (MUV) was specifically designed to defeat those artefacts; running it covers the same scientific question more rigorously. Reviewers will likely ask "why no DUD-E?" — this paragraph is the answer.
 
-**Metrics:** AUC-ROC, BEDROC(α=20), EF₁%, LogAUC.
+**Why defer rather than drop entirely.** Keeping the specification in place lets a future contributor — or future-us — pick it up without redesigning the experiment. The decision can be reversed cheaply.
 
-**Reporting:** Report results both on the full 102-target set (for literature comparability) and on the bias-reduced subset of ~47 targets identified by Lagarde et al. (*J. Chem. Inf. Model.* 2015, 55, 1297–1307).
+**Why not just run it.** Two reasons that compound:
+
+- *Bias.* DUD-E results are weighted below WelQrate and MUV in the project's interpretation framework anyway, because the field has documented multiple ways trivial classifiers achieve high scores on DUD-E without actually learning binding-relevant features. Including a benchmark whose own results we plan to caveat heavily is a weak use of compute.
+- *Compute.* DUD-E full set is ~1.15 M molecules (102 targets × ~11k each); the bias-reduced 47-target subset is still ~530 k. That is 2–4× the combined cost of D3 (WelQrate, ~270 k) + D4 (MUV, ~255 k) — and the bulk of the cost is ElektroNN inference, which is the project's single most expensive stage.
+
+**Specification (for if/when EXP-3c is later implemented):**
+
+- Data source: 102 protein targets with 22,886 clustered ligands from ChEMBL, each with 50 property-matched decoys from ZINC.
+  - Paper: Mysinger et al., *J. Med. Chem.* 2012, 55, 6582–6594. DOI: [10.1021/jm300687e](https://doi.org/10.1021/jm300687e)
+  - Data: [dude.docking.org](http://dude.docking.org)
+- Procedure: For each target, use one active as query. Rank remaining actives + decoys by similarity. Compute per-target metrics and average across targets.
+- Metrics: AUC-ROC, BEDROC(α=20), EF₁%, LogAUC.
+- Reporting: Report results both on the full 102-target set (for literature comparability) and on the bias-reduced subset of ~47 targets identified by Lagarde et al. (*J. Chem. Inf. Model.* 2015, 55, 1297–1307).
 
 ---
 
@@ -383,7 +399,7 @@ This stratification also dovetails with EXP-2 (Hammett series — pure electroni
 
 - Never pick a single favorable metric. Report the full metric suite for each experiment.
 - Report per-target results (or at least distributions) in supplementary material, not just averages.
-- For WelQrate and DUD-E, compare scaffold split vs. random split results to quantify analog bias effects.
+- For WelQrate, compare scaffold split vs. random split results to quantify analog bias effects. (DUD-E was originally listed here for the same comparison; EXP-3c is currently deferred — see §4.3c.)
 - Report computational cost (time per molecule for embedding computation) to contextualize any accuracy gains.
 
 ---
@@ -431,7 +447,7 @@ Rationale: a single minimum-energy conformer is the natural input for QM-derived
 | 2 | Functional group substitution | Internal | Custom (3 sets, ~32 mols) | Hammett correlation ρ, donor/acceptor clustering silhouette | Electronic effect sensitivity |
 | 3a | WelQrate retrieval | External | 9 targets | LogAUC, BEDROC(20), EF₁%, DCG₁₀₀ | Virtual screening on curated data |
 | 3b | MUV retrieval | External | 17 targets | AUC-ROC, BEDROC(20), EF₁% | Performance without analog bias |
-| 3c | DUD-E retrieval | External | 102 targets | AUC-ROC, BEDROC(20), EF₁% | Literature-comparable VS benchmark |
+| 3c | DUD-E retrieval | **Deferred** (see §4.3c) | 102 targets | AUC-ROC, BEDROC(20), EF₁% | Literature-comparable VS benchmark — implementation deferred, paper-time discussion required |
 | 4 | Activity cliff analysis | External | ~10,000 MMP pairs from ChEMBL | SALI, cliff detection AUC, distance–ΔpKi ρ | Sensitivity to potency-relevant changes |
 | 5 | Bioisostere recognition | External | SwissBioisostere + classical pairs | Bioisostere detection AUC, cross/within ratio | Functional equivalence beyond topology |
 | 6 | Scaffold hopping | External | 88 targets (Riniker & Landrum) | Scaffold-EF₅%, Scaffold-EF/EF ratio | Chemotype diversity in retrieval |
@@ -448,6 +464,6 @@ The electron density method should be considered an improvement if **at least th
 4. **Activity-based retrieval:** Non-inferior AUC-ROC on WelQrate (Exp. 3a) compared to the best fingerprint baseline, AND superior performance on MUV (Exp. 3b, p < 0.05).
 5. **Activity cliff sensitivity:** Higher distance–ΔpKi Spearman ρ than all topological baselines (Exp. 4, p < 0.01).
 
-If the method excels on internal tests and bioisostere/scaffold hopping but underperforms on general retrieval (WelQrate/DUD-E), this indicates a niche advantage for scaffold hopping applications rather than general-purpose superiority—which is still a valuable and publishable finding.
+If the method excels on internal tests and bioisostere/scaffold hopping but underperforms on general retrieval (WelQrate/MUV), this indicates a niche advantage for scaffold hopping applications rather than general-purpose superiority—which is still a valuable and publishable finding.
 
 If the method underperforms on bioisostere recognition (Exp. 5), the core hypothesis (electron density captures functional similarity) is weakened regardless of other results, and the choice of basis functions or distance metric should be revisited before further benchmarking.

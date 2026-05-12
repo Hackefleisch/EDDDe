@@ -98,6 +98,13 @@ Register in [eddde/data/__init__.py](eddde/data/__init__.py).
 
 Implement the `Experiment` protocol in `eddde/experiments/`. Declare `datasets: list[str]` for the dataset IDs it runs on. The `run(method, stage_data, embeddings, dataset_id, out)` method writes raw results and a `metrics.json` to `out/`. Register in [eddde/experiments/__init__.py](eddde/experiments/__init__.py).
 
+**Retrieval experiments** (EXP-3a/3b, and EXP-3c if/when implemented) share metric definitions, the raw-CSV schema, and most plots via [eddde/experiments/retrieval_common.py](eddde/experiments/retrieval_common.py). Use it for any new retrieval-style experiment to keep metrics consistent across them:
+- Math helpers: `logauc`, `bedroc`, `ef_at_percent`, `dcg_at_k`, `nanmean`, `mean_se`.
+- IO helpers: `RETRIEVAL_COLS` (canonical raw-CSV schema), `read_csv_or_empty`, `metric_entry`, `metrics_to_json`.
+- Plot helpers: `plot_enrichment_curves`, `plot_metric_heatmap`, `plot_cumulative_recall`, `plot_rank_distributions` — each takes `(exp_id, plots_dir, method_ids, datasets)` and auto-shapes the subplot grid from `len(datasets)`, so the same code handles 9-target (WelQrate) and 17-target (MUV) layouts.
+
+Experiments compose these in their own `run()` and `make_plots()` rather than inheriting from a shared base class — the differences across retrieval experiments are at the *query/pool definition* level (scaffold seeds vs. random query draws vs. one-active-per-target), which hooks cleanly into the call site without an abstraction layer.
+
 ### Data stages
 
 Stages are built in order: `SMILES → CONFORMERS → ELEKTRONN_COEFFS`. Methods declare the highest stage they need via `needs`; stages above that are never built. Stage paths:
@@ -149,7 +156,7 @@ Example: `python scripts/draw_dataset.py S6 --cols 3`
 - Distance convention: smaller = more similar. For similarity-based methods (Tanimoto, ROCS), convert as `distance = 1 - similarity`.
 - Identifiers from the plan (B1, D3, EXP-4, M-BEDROC20, etc.) are load-bearing — use them verbatim in filenames, `id` fields, and result columns so cross-referencing stays trivial.
 - Each MUT variant needs its own stable `id` (e.g. `MUT-mean`, `MUT-attention`) so benchmark outputs can distinguish condensing schemes.
-- DUD-E (D5) results are **weighted below** WelQrate (D3) and MUV (D4) in final conclusions due to known analog bias.
+- EXP-3c (DUD-E / D5) is **deferred** — see [PROJECT_PLAN.md §5.5](PROJECT_PLAN.md) and [experimental_plan.md §4.3c](experimental_plan.md). The dataset has known analog bias and property-matching shortcuts, EXP-3a + EXP-3b cover the same question more rigorously, and the compute cost (~1.15 M molecules) is 2–4× of D3+D4 combined. The spec is preserved in case a future contributor implements it; the paper must explicitly justify the omission.
 - EXP-5 (bioisostere recognition) is the critical hypothesis test. If MUTs fail there, the core hypothesis is weakened regardless of other results.
 - Statistical reporting: always pair p-values with effect sizes (Cliff's delta or matched-pairs rank-biserial). Never report a single cherry-picked metric.
 - Conformer fairness: all 3D methods use the **same single conformer per molecule** — the lowest MMFF94 energy geometry found across 5 ETKDGv3 starting geometries. Each `Mol` in the conformers pkl has exactly one conformer. The global generator is in [eddde/data/conformers.py](eddde/data/conformers.py) — don't let any method silently generate its own. **Potential follow-up**: add a best-of-ensemble variant (more conformers, pick minimum pairwise distance) uniformly across all 3D methods to test whether conformational flexibility adds signal.

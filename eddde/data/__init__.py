@@ -11,6 +11,7 @@ from .sources.subst_benzenes import SubstBenzenes
 from .sources.subst_cyclohexanes import SubstCyclohexanes
 from .sources.hammett_series import HammettSeries
 from .sources.welqrate import ALL_WELQRATE
+from .sources.muv import ALL_MUV
 
 
 DATASETS: dict[str, Dataset] = {}
@@ -31,4 +32,6 @@ _register(SubstBenzenes())
 _register(SubstCyclohexanes())
 _register(HammettSeries())
 for _ds in ALL_WELQRATE:
+    _register(_ds)
+for _ds in ALL_MUV:
     _register(_ds)

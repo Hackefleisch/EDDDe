@@ -13,6 +13,10 @@ Embedding: per-mol `Chem.Mol` (with the shared single conformer). The
 `ShapeInput` object that `rdShapeAlign` needs is not picklable, so we build
 it fresh in each `distance` call. Construction is ~0.04 ms vs. ~0.5-15 ms
 for the alignment itself, so caching it would not move the needle.
+
+Only `distance()` is implemented — the alignment is inherently per-pair
+(no batched form). The framework's `pairwise_matrix` fans out across
+`multiprocessing.Pool` automatically for large matrices.
 """
 from __future__ import annotations
 
@@ -22,11 +26,12 @@ from rdkit import Chem
 from rdkit.Chem import rdShapeAlign
 
 from ...data.base import Stage
+from ..base import Method
 
 
-class GaussianShapeAlign:
+class GaussianShapeAlign(Method):
     id = "B8"
-    version = "rdshapealign-combo-v1"
+    version = "rdshapealign-combo-v2"
     needs = Stage.CONFORMERS
 
     def embed_dataset(self, stage_data: dict) -> dict[str, Any]:

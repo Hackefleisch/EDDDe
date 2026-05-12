@@ -42,6 +42,7 @@ import pandas as pd
 from ..cache import hash_file, is_stale, write_manifest
 from ..data.base import Stage
 from ..data.sources.welqrate import N_SCAFFOLD_SEEDS
+from ..methods.distance import pairwise_matrix
 from . import retrieval_common as rc
 from .base import result_dir
 
@@ -53,7 +54,7 @@ WELQRATE_DATASET_IDS = [
 
 class Exp3aWelQrate:
     id = "EXP-3a"
-    version = "v4"
+    version = "v5"
     datasets = WELQRATE_DATASET_IDS
 
     metric_direction = {
@@ -85,26 +86,31 @@ class Exp3aWelQrate:
             test_active_ids = [m for m in mol_ids if split[m] == "test" and activity[m] == 1]
             pool_ids        = [m for m in mol_ids if split[m] in ("valid", "test")]
             n_actives_in_pool_base = sum(activity[c] for c in pool_ids)
+            pool_col_of = {c: j for j, c in enumerate(pool_ids)}
 
             q_logauc = []
             q_bedroc = []
             q_ef1    = []
             q_dcg100 = []
 
-            for query_id in test_active_ids:
-                candidates = [m for m in pool_ids if m != query_id]
-                distances = np.array([
-                    method.distance(embeddings[query_id], embeddings[cid])
-                    for cid in candidates
-                ])
-                order = np.argsort(distances, kind="stable")
+            # One matrix per seed: (test_actives × pool). Phase A picks one row
+            # per query and slices out the self-column.
+            D = pairwise_matrix(method, embeddings, test_active_ids, pool_ids)
 
-                n_total = len(candidates)
-                n_actives = n_actives_in_pool_base - 1  # query removed
+            for i, query_id in enumerate(test_active_ids):
+                self_col = pool_col_of[query_id]
+                row = D[i]
+                # Argsort over the full row, then drop the self index from the
+                # ordering — preserves stable sort on ties without an extra mask.
+                order = np.argsort(row, kind="stable")
+                order = order[order != self_col]
+
+                n_total = len(pool_ids) - 1
+                n_actives = n_actives_in_pool_base - 1
 
                 active_ranks: list[int] = []
                 for rank_0, idx in enumerate(order):
-                    cid = candidates[idx]
+                    cid = pool_ids[idx]
                     if activity[cid] == 1:
                         rank = rank_0 + 1
                         active_ranks.append(rank)
@@ -113,7 +119,7 @@ class Exp3aWelQrate:
                             "query_id": query_id,
                             "active_id": cid,
                             "rank": rank,
-                            "distance": float(distances[idx]),
+                            "distance": float(row[idx]),
                             "n_total": n_total,
                             "n_actives_in_pool": n_actives,
                         })

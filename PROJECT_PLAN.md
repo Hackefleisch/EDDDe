@@ -148,13 +148,11 @@ All experiments produce MUT results and corresponding results for every applicab
 - **Question**: Does MUT rank actives closer to query actives than decoys/inactives?
 - **Data**: D3. Nine datasets (AID435008, AID1798, AID435034, AID1843, AID2258, AID463087, AID488997, AID2689, AID485290). Use scaffold split provided by WelQrate (prevents analog-bias leakage).
 - **Scaffold split interpretation**: The Bemis-Murcko scaffold of a molecule is its ring system with all side chains stripped. A scaffold split groups molecules sharing the same scaffold and assigns whole scaffold groups to train/valid/test, so no scaffold seen at test time appears in train. WelQrate provides five seeds — five independent random shuffles of the scaffold-group ordering before the 3:1:1 partitioning. Each seed yields a different but equally valid partition; the molecule's scaffold never changes, only which partition it lands in. For EXP-3a the **test** split supplies the queries; results are averaged across all five seeds to reduce sensitivity to any single partition.
-- **Pool composition**:
-  - Both tasks use the same pool: **valid + test** (all non-train molecules, minus the molecule itself). Train is excluded to reduce computation (it is 60 % of the data and contributes no unique signal for non-learned methods). Valid molecules have different scaffolds from the query by construction; test molecules include scaffold-mates of the query, preserving a realistic retrieval setting. Scaffold-diversity analysis is delegated to EXP-6.
+- **Pool composition**: **valid + test** (all non-train molecules, minus the query itself). Train is excluded to reduce computation (it is 60 % of the data and contributes no unique signal for non-learned methods). Valid molecules have different scaffolds from the query by construction; test molecules include scaffold-mates of the query, preserving a realistic retrieval setting. Scaffold-diversity analysis is delegated to EXP-6.
 - **Protocol**:
   - For each target and each scaffold seed: draw query actives from the test split.
-  - Task 1: for each query, rank the valid+test pool by distance; record active ranks (compact). Compute M-LOGAUC, M-BEDROC20, M-EF1, M-DCG100; average over queries and seeds per target.
-  - Task 2: for each test molecule, find k=5,10,20 nearest neighbors in train; vote on predicted label. Report M-AUCROC.
-- **Metrics**: M-LOGAUC, M-BEDROC20, M-EF1, M-DCG100, M-AUCROC
+  - For each query, rank the valid+test pool by distance; record active ranks (compact). Compute M-LOGAUC, M-BEDROC20, M-EF1, M-DCG100; average over queries and seeds per target.
+- **Metrics**: M-LOGAUC, M-BEDROC20, M-EF1, M-DCG100
 - **Expected behavior**: Strong methods achieve BEDROC20 > 0.3. MUT expected competitive with learned methods (B12–B14) and better than pure topology on scaffold-split.
 - **Success criterion**: MUT's median LogAUC across 9 targets ≥ that of ECFP4 (B1) and ≥ Mol2vec (B12).
 

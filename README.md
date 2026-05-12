@@ -92,7 +92,7 @@ Builds the SMILES stage if needed (cached) and saves a PNG grid to `figures/<dat
 
 ## Current results
 
-Results below are from running EXP-1 and EXP-2 against B1–B7 and MUT-mean. EXP-3a (WelQrate retrieval) and EXP-3b (MUV retrieval) are implemented and run end-to-end against their respective datasets (9 WelQrate AIDs / 17 MUV assays), but their analysis/aggregation code has not yet been validated — no headline numbers are reported here until that pass is done. All results are fully reproducible: `python -m eddde` regenerates them from scratch.
+Results below are from running EXP-1, EXP-2, EXP-3a, and EXP-3b against B1–B7, B9, and MUT-mean. EXP-3a's analysis pass is still being validated, so the WelQrate numbers should be treated as provisional. All results are fully reproducible: `python -m eddde` regenerates them from scratch.
 
 ### EXP-1 — Homologous Series Smoothness (S1–S5)
 
@@ -125,6 +125,49 @@ Tests whether embeddings reflect electronic character of substituents across thr
 EXP-2 results are a first look with only the simplest MUT variant (atom-mean pooling). MUT-mean does not yet show an advantage on electronic sensitivity — topological fingerprints outperform it on M-HAMMETT-PAIR. This is expected to improve as more informative condensing schemes (irrep-weighted, attention-pooled) are implemented. The Hammett scatter plots are the primary diagnostic at this stage.
 
 Note: Br-containing molecules are dropped by the element filter (see above), reducing S6 to 11 and S8 to 9 compounds.
+
+### EXP-3a — WelQrate Retrieval (9 PubChem AIDs)
+
+Provisional — the analysis pass has not been fully validated yet. Retrieval against the WelQrate scaffold-split pool (valid + test, 5 seeds). Topological fingerprints lead, with B5 (Atom Pair) and B3 (FCFP4) at the top. MUT-mean trails the topology pack on every metric but remains comparable to RDKit descriptors (B7) and USR (B9). Numbers are mean±SE across the 9 targets.
+
+| Method | M-LOGAUC | M-BEDROC20 | M-EF1 | M-AUCROC (k=20) | Avg rank | s/mol |
+| --- | --- | --- | --- | --- | --- | --- |
+| B5 | 0.193±0.010 | 0.365±0.062 | 2.571±0.314 | 0.757±0.020 | 1.43 | 0.0205 |
+| B3 | 0.190±0.010 | 0.361±0.065 | 2.529±0.345 | 0.749±0.023 | 2.43 | 0.0206 |
+| B1 | 0.182±0.005 | 0.353±0.066 | 2.387±0.259 | 0.739±0.018 | 3.57 | 0.0204 |
+| B6 | 0.194±0.011 | 0.365±0.066 | 2.346±0.287 | 0.722±0.020 | 3.57 | 0.0205 |
+| B2 | 0.178±0.004 | 0.344±0.067 | 2.252±0.213 | 0.729±0.018 | 4.86 | 0.0205 |
+| B4 | 0.179±0.008 | 0.343±0.063 | 2.414±0.328 | 0.727±0.021 | 5.14 | 0.0208 |
+| MUT-mean | 0.162±0.007 | 0.307±0.060 | 1.774±0.156 | 0.661±0.021 | 7.29 | 0.0444 |
+| B7 | 0.165±0.006 | 0.292±0.066 | 1.448±0.115 | 0.602±0.025 | 8.00 | 0.029 |
+| B9 | 0.160±0.005 | 0.292±0.066 | 1.400±0.102 | 0.605±0.019 | 8.71 | 0.0345 |
+
+### EXP-3b — MUV Retrieval (17 PubChem AIDs)
+
+Retrieval against the per-target pool, 5 deterministically-seeded random query draws per target. MUV is constructed to defeat analog-based similarity, so absolute numbers are expected to be much lower than EXP-3a — and they are: AUC-ROC tops out at 0.60 for the best topological fingerprint.
+
+| Method | M-AUCROC | M-BEDROC20 | M-EF1 | Avg rank | s/mol |
+| --- | --- | --- | --- | --- | --- |
+| B6 | 0.597±0.014 | 0.151±0.018 | 5.040±0.908 | 2.00 | 0.00162 |
+| B1 | 0.551±0.019 | 0.140±0.017 | 5.284±1.029 | 2.67 | 0.00157 |
+| B5 | 0.601±0.021 | 0.148±0.018 | 4.344±0.744 | 2.67 | 0.00161 |
+| B3 | 0.556±0.018 | 0.139±0.017 | 4.963±1.126 | 3.67 | 0.00167 |
+| B2 | 0.544±0.019 | 0.137±0.018 | 5.110±1.121 | 4.67 | 0.00158 |
+| B4 | 0.550±0.019 | 0.119±0.012 | 3.551±0.582 | 5.67 | 0.00198 |
+| B9 | 0.547±0.013 | 0.096±0.006 | 1.583±0.272 | 7.00 | 0.0143 |
+| MUT-mean | 0.508±0.020 | 0.089±0.010 | 2.159±0.452 | 8.00 | 0.0247 |
+| B7 | 0.527±0.013 | 0.074±0.007 | 1.218±0.191 | 8.67 | 0.0065 |
+
+**Observations and anomalies.**
+
+- **MUT-mean is essentially random at AUC level (0.508).** Expected for the simplest pooling scheme against property-matched decoys — a 127-dim atom-mean captures mostly global molecular character, which is exactly what MUV's decoy construction matches on. The same failure mode hits B7 (RDKit 200-d descriptors, AUC 0.527).
+- **MUT-mean's EF1 (2.16) outranks B7's (1.22) and B9's (1.58).** So even where overall ranking is uninformative, the very top of MUT-mean's ranking carries some signal — more than RDKit descriptors or USR shape moments do. This is the kind of partial signal a smarter condensing scheme should be able to amplify.
+- **Three targets where MUT-mean is sub-random** (AUC < 0.43): MUV_644 (0.404), MUV_689 (0.422), MUV_712 (0.377). Mild anti-correlation, not just noise — but the 5-seed × 30-active design means each of these is roughly five queries against ~15 000 candidates, so a single bad seed dominates. Worth re-checking once more MUT variants exist.
+- **Bimodal targets MUV_644, MUV_712, MUV_846**: MUT-mean has near-random or sub-random AUC but high EF1 (4.14, 2.76, 5.71 respectively). The top of the ranking is enriched with actives while the bulk of actives end up *low* in the ranking — i.e. the embedding recognises some active subclusters strongly and others not at all. This is a more interesting failure mode than "uniformly random" and could be diagnostic of which chemotypes the mean-pooled coefficients actually distinguish.
+- **MUV_737 is the standout positive case for MUT-mean**: AUC 0.742, BEDROC20 0.169, EF1 4.44 — matching B5/B6 on a target where most baselines also do well. Worth looking at what makes 737 different (chemotype range, active fragment patterns) when characterising why the embedding fires here and not elsewhere.
+- **Four targets with EF1 = 0.00** for MUT-mean (MUV_689, MUV_832, MUV_858, MUV_859): zero actives in the top 1 % across all 5 seeds. Random expectation is ≈0.3 actives per query, so consistently hitting zero is a real anti-signal for these targets, not just sampling variance.
+
+None of the headline numbers are out of the ordinary for MUV. Pre-MUT-era reports of fingerprints on MUV typically show AUCs in the 0.55–0.65 range and BEDROC20 around 0.1–0.2 (Rohrer & Baumann 2009; Riniker & Landrum 2013), which matches what we observe. The interesting signal is in the *shape* of MUT-mean's failure, not its magnitude.
 
 ---
 

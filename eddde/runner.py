@@ -77,6 +77,10 @@ def _embed_if_stale(method, ds_id: str, stage_data: dict) -> Path:
                 em.n_pairs_benchmarked = n_pairs
                 manifest_path(path).write_text(em.to_json())
                 print(f"    benchmarked: {dist_per_pair*1e6:.1f} µs/pair (n={n_pairs})")
+        # Stash measured per-pair cost on the method so pairwise_matrix's
+        # adaptive parallel-threshold sees it for this dataset.
+        if em and em.n_pairs_benchmarked:
+            method._distance_time_per_pair = em.distance_time_per_pair
         return path
 
     print(f"  [embed {method.id} on {ds_id}] computing...")
@@ -87,6 +91,7 @@ def _embed_if_stale(method, ds_id: str, stage_data: dict) -> Path:
     dist_per_pair, n_pairs = benchmark_distance(method, emb)
     if n_pairs:
         print(f"  [embed {method.id} on {ds_id}] distance: {dist_per_pair*1e6:.1f} µs/pair (n={n_pairs})")
+        method._distance_time_per_pair = dist_per_pair
 
     stage_m = Manifest.load(manifest_path(stage_file))
     upstream = stage_m.chain_time() if stage_m else 0.0

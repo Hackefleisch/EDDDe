@@ -40,20 +40,10 @@ from scipy.stats import spearmanr
 
 from ..cache import hash_file, is_stale, write_manifest
 from ..data.base import Stage
+from ..methods.distance import pairwise_matrix
 from .base import result_dir
 
 LABEL_COLORS = {"donor": "#2196F3", "acceptor": "#F44336", "neutral": "#9E9E9E"}
-
-
-def _pairwise_distances(method, embeddings: dict, mol_ids: list[str]) -> np.ndarray:
-    n = len(mol_ids)
-    D = np.zeros((n, n))
-    for i in range(n):
-        for j in range(i + 1, n):
-            d = float(method.distance(embeddings[mol_ids[i]], embeddings[mol_ids[j]]))
-            D[i, j] = d
-            D[j, i] = d
-    return D
 
 
 def _mds_2d(D: np.ndarray) -> np.ndarray:
@@ -76,7 +66,7 @@ def _m_silhouette(coords_2d: np.ndarray, labels: list[str]) -> float:
 
 class Exp2FunctionalGroup:
     id = "EXP-2"
-    version = "v3-pair-hammett-split-silhouette"
+    version = "v4-pair-hammett-split-silhouette"
     datasets = ["S6", "S7", "S8"]
 
     # Direction: +1 = higher is better, -1 = lower is better.
@@ -102,7 +92,7 @@ class Exp2FunctionalGroup:
         mol_ids = list(df["id"].astype(str))
         out.mkdir(parents=True, exist_ok=True)
 
-        D = _pairwise_distances(method, embeddings, mol_ids)
+        D = pairwise_matrix(method, embeddings, mol_ids, mol_ids)
         pd.DataFrame(D, index=mol_ids, columns=mol_ids).to_csv(out / "pairwise_distances.csv")
 
         metrics: dict = {}

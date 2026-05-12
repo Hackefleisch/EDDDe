@@ -10,12 +10,18 @@ The full experimental design is in [PROJECT_PLAN.md](PROJECT_PLAN.md). Human-rea
 
 ## Architecture
 
-Every method — MUT or baseline — exposes the same two-function interface:
+Every method — MUT or baseline — subclasses `eddde.methods.base.Method` and implements `embed_dataset` plus exactly one of `distance` (per-pair) or `distances` (batched matrix). The framework derives the other automatically:
 
 ```python
-method.embed_dataset(stage_data)  # -> dict[mol_id -> embedding]
-method.distance(e1, e2)           # -> float  (smaller = more similar)
+class MyMethod(Method):
+    def embed_dataset(self, stage_data) -> dict[mol_id, embedding]: ...
+
+    # Pick one — the unimplemented side is auto-derived.
+    def distance(self, e1, e2) -> float: ...                          # per-pair
+    def distances(self, embs_q, embs_c) -> np.ndarray: ...            # batched
 ```
+
+Use `distances` whenever a vectorised C/BLAS/GPU implementation is natural (fingerprints with `BulkTanimotoSimilarity`, vector embeddings with `cdist`, future GPU/OT methods). Use `distance` only when the operation is inherently per-pair (B8 Gaussian shape alignment, exact-OT LPs); the framework auto-parallelises those across a process pool for large matrices. See [CLAUDE.md](CLAUDE.md) for details.
 
 The runner materializes dataset stages (SMILES → conformers → ElektroNN coefficients), caches embeddings per `(method, dataset)`, then runs each registered experiment against each registered method. Everything is content-addressed: an artifact is only recomputed when its producer version or an upstream output hash has changed.
 
@@ -30,7 +36,8 @@ eddde/
     pipeline.py              # build_up_to(dataset, stage), SMILES-stage element filter
     sources/                 # one file per dataset (S1–S8 + 9 WelQrate AIDs + 17 MUV assays implemented)
   methods/
-    base.py                  # Method protocol, embedding cache
+    base.py                  # Method ABC, embedding cache, distance benchmark
+    distance.py              # pairwise_matrix(): serial / multiprocessing / batched-override dispatch
     baselines/               # one file per baseline (B1–B7 + B9 USR implemented)
     muts/                    # one file per MUT condensing scheme (MUT-mean implemented)
   experiments/               # one file per experiment (EXP-1, EXP-2, EXP-3a, EXP-3b implemented; retrieval_common.py shared)
@@ -72,7 +79,7 @@ The runner checks every stage, embedding, and experiment result for staleness an
 
 ## Extending
 
-**Add a baseline or MUT** — create a class in `eddde/methods/baselines/` or `eddde/methods/muts/` with `id`, `version`, `needs` (a `Stage`), `embed_dataset`, and `distance`. Register it in `eddde/methods/__init__.py`.
+**Add a baseline or MUT** — subclass `Method` (from `eddde/methods/base.py`) in `eddde/methods/baselines/` or `eddde/methods/muts/`, setting `id`, `version`, `needs` (a `Stage`), and `embed_dataset`. Implement either `distance(e1, e2)` (per-pair) or `distances(embs_q, embs_c)` (batched matrix) — see the architecture note above for which to pick. Register in `eddde/methods/__init__.py`.
 
 **Add a dataset** — subclass `Dataset` in `eddde/data/sources/`, implement `build_smiles` (and `build_native_conformers` if the dataset ships 3D structures). Register in `eddde/data/__init__.py`.
 
@@ -130,17 +137,7 @@ Note: Br-containing molecules are dropped by the element filter (see above), red
 
 Provisional — the analysis pass has not been fully validated yet. Retrieval against the WelQrate scaffold-split pool (valid + test, 5 seeds). Topological fingerprints lead, with B5 (Atom Pair) and B3 (FCFP4) at the top. MUT-mean trails the topology pack on every metric but remains comparable to RDKit descriptors (B7) and USR (B9). Numbers are mean±SE across the 9 targets.
 
-| Method | M-LOGAUC | M-BEDROC20 | M-EF1 | M-AUCROC (k=20) | Avg rank | s/mol |
-| --- | --- | --- | --- | --- | --- | --- |
-| B5 | 0.193±0.010 | 0.365±0.062 | 2.571±0.314 | 0.757±0.020 | 1.43 | 0.0205 |
-| B3 | 0.190±0.010 | 0.361±0.065 | 2.529±0.345 | 0.749±0.023 | 2.43 | 0.0206 |
-| B1 | 0.182±0.005 | 0.353±0.066 | 2.387±0.259 | 0.739±0.018 | 3.57 | 0.0204 |
-| B6 | 0.194±0.011 | 0.365±0.066 | 2.346±0.287 | 0.722±0.020 | 3.57 | 0.0205 |
-| B2 | 0.178±0.004 | 0.344±0.067 | 2.252±0.213 | 0.729±0.018 | 4.86 | 0.0205 |
-| B4 | 0.179±0.008 | 0.343±0.063 | 2.414±0.328 | 0.727±0.021 | 5.14 | 0.0208 |
-| MUT-mean | 0.162±0.007 | 0.307±0.060 | 1.774±0.156 | 0.661±0.021 | 7.29 | 0.0444 |
-| B7 | 0.165±0.006 | 0.292±0.066 | 1.448±0.115 | 0.602±0.025 | 8.00 | 0.029 |
-| B9 | 0.160±0.005 | 0.292±0.066 | 1.400±0.102 | 0.605±0.019 | 8.71 | 0.0345 |
+Table dropped: EXP-3a's k-NN classification task has been removed (see §5.3 of PROJECT_PLAN.md for the rationale), so the previous numbers are stale and the Avg-rank column will refresh once `EXP-3a` is rerun. The qualitative ordering on the retained metrics (M-LOGAUC, M-BEDROC20, M-EF1, M-DCG100) is unchanged.
 
 ### EXP-3b — MUV Retrieval (17 PubChem AIDs)
 
@@ -200,7 +197,7 @@ None of the headline numbers are out of the ordinary for MUV. Pre-MUT-era report
 | **Experiments** | |
 | EXP-1 Homologous series smoothness (M-MONO, M-SMOOTH, M-LIN) | done |
 | EXP-2 Functional group substitution sensitivity (M-HAMMETT-PAIR, M-SILHOUETTE) | done |
-| EXP-3a WelQrate retrieval (M-LOGAUC, M-BEDROC20, M-EF1, M-DCG100, M-AUCROC) | implemented; analysis methods awaiting validation |
+| EXP-3a WelQrate retrieval (M-LOGAUC, M-BEDROC20, M-EF1, M-DCG100) | implemented; analysis methods awaiting validation |
 | EXP-3b MUV retrieval (M-AUCROC, M-BEDROC20, M-EF1; 5 deterministically-seeded random query draws per target) | implemented; first end-to-end run in progress |
 | EXP-3c DUD-E retrieval | **deferred** (see PROJECT_PLAN.md §5.5; revisit at implementation time, discuss at writing time) |
 | EXP-4 Activity cliff sensitivity | pending |

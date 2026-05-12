@@ -8,11 +8,13 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from scipy.spatial.distance import cdist
 
 from ...data.base import Stage
+from ..base import Method
 
 
-class MutMean:
+class MutMean(Method):
     id = "MUT-mean"
     version = "mean-euclidean-v1"
     needs = Stage.ELEKTRONN_COEFFS
@@ -21,5 +23,7 @@ class MutMean:
         coefficients: dict[str, np.ndarray] = stage_data[Stage.ELEKTRONN_COEFFS]["coefficients"]
         return {mol_id: coeffs.mean(axis=0) for mol_id, coeffs in coefficients.items()}
 
-    def distance(self, e1: np.ndarray, e2: np.ndarray) -> float:
-        return float(np.linalg.norm(e1 - e2))
+    def distances(self, embs_q: list[Any], embs_c: list[Any]) -> np.ndarray:
+        Q = np.stack(embs_q)
+        C = np.stack(embs_c)
+        return cdist(Q, C, "euclidean")

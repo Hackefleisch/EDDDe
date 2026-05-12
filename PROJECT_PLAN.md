@@ -307,6 +307,43 @@ Each experiment must produce the following, saved to `results/EXP-X/`:
 
 **Embeddings** (intermediate products) are saved to `cache/embeddings/{method_id}/{dataset_id}.pkl` and indexed by manifest for staleness tracking. Every artifact sidecar records `{version, inputs, output_hash, compute_time, upstream_compute_time, timestamp, dataset_size, compute_time_per_mol}`. The aggregate `results/SUMMARY.md` table includes an `s/mol` column (end-to-end chain time per molecule, averaged across datasets).
 
+### 7.1 Ranking Semantics in `results/SUMMARY.md`
+
+The summary writer aggregates ranks in two stages:
+
+1. **Within an experiment.** For each metric, methods are ranked by mean value across the metric's applicable datasets (lower rank = better, with `metric_direction` controlling sort order). Each method's per-experiment "Avg rank" column is the mean of its metric ranks within that experiment.
+2. **Across experiments.** Each experiment contributes exactly one scalar — its within-experiment Avg rank — to the cross-experiment average. The number of metrics inside an experiment does **not** affect cross-experiment weight: a 4-metric experiment and a 3-metric experiment count equally.
+
+**Deferred design decision — headline-metric selection (revisit when EXP-4/5/6 land).**
+
+Several experiments report multiple metrics that capture closely-related signal:
+
+- **EXP-3a**: M-LOGAUC, M-BEDROC20, M-EF1, M-DCG100 are all early-enrichment retrieval scores with different weighting curves; they typically agree on method ranking. Effective independent signal ≈ 1.3 of 4.
+- **EXP-3b**: M-AUCROC is genuinely distinct from M-BEDROC20 + M-EF1, but the latter two cluster together.
+- **EXP-2**: M-HAMMETT-PAIR (all O(n²) pairs) and M-HAMMETT-ABS (just the H-reference row) measure the same Hammett-correlation capability with different aggregations.
+- **EXP-1**: M-MONO (Spearman) and M-LIN (R²) overlap on monotonic-distance growth; M-SMOOTH is genuinely orthogonal.
+- **EXP-4 (planned)**: M-CLIFF-AUC, M-SALI-DIST, M-DIST-POTENCY-RHO all probe "does distance grow with potency difference" at different aggregations.
+- **EXP-5 (planned)**: M-BIO-AUC and M-BIO-RANK both score bioisostere separation.
+- **EXP-6 (planned)**: M-SCAFRATIO is literally `M-SCAFEF5 / M-EF5` — including all three triple-counts the same ranking.
+
+Within-experiment redundancy is mostly fine for the cross-experiment ranking (each experiment still contributes one collapsed value), but it distorts the per-experiment "Avg rank" column shown in each experiment's table: a method's per-experiment rank reflects a consensus across redundant metrics rather than a balanced view.
+
+**Proposed mechanism (not yet implemented):** Add an optional `rank_metrics: tuple[str, ...]` on the `Experiment` protocol. The SUMMARY writer would use this subset for both the within-experiment Avg rank and the cross-experiment aggregation, while the per-experiment table continues to show every metric (rank_metrics + diagnostic metrics) for transparency. If `rank_metrics` is unset, behavior falls back to today's "all metrics".
+
+**Candidate headline picks** (decide at implementation time, not now):
+
+| Experiment | Candidate `rank_metrics` | Demoted to diagnostic |
+|----|----|----|
+| EXP-1 | `("M-MONO", "M-SMOOTH")` | M-LIN |
+| EXP-2 | `("M-HAMMETT-PAIR", "M-SILHOUETTE-S6", "M-SILHOUETTE-S7")` | M-HAMMETT-ABS |
+| EXP-3a | `("M-LOGAUC",)` *or* `("M-BEDROC20",)` | The other three (LogAUC is WelQrate's canonical; BEDROC20 is the literature default) |
+| EXP-3b | `("M-AUCROC", "M-BEDROC20")` | M-EF1 |
+| EXP-4 | `("M-CLIFF-AUC",)` | M-SALI-DIST, M-DIST-POTENCY-RHO |
+| EXP-5 | `("M-BIO-AUC",)` | M-BIO-RANK, M-CROSS-WITHIN-RATIO |
+| EXP-6 | `("M-SCAFRATIO", "M-RECALL-HELDOUT-SCAFFOLD")` | M-EF5, M-SCAFEF5 |
+
+These picks are judgement calls and benefit from being made when writing the paper (with a full set of cross-method numbers visible), not pre-emptively now. The mechanism is cheap to add; the picks are the load-bearing decision.
+
 ---
 
 ## 8. Required Plots

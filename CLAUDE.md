@@ -69,22 +69,39 @@ distance_time_per_pair, n_pairs_benchmarked
 
 `upstream_compute_time` accumulates the full chain cost so it can be read in O(1) from any manifest. `dataset_size` records the number of molecules at write time; `compute_time_per_mol` is `compute_time / dataset_size`. `Manifest.chain_time_per_mol()` divides the full chain time by `dataset_size` — this is the `s/mol` column in `results/SUMMARY.md`.
 
-`distance_time_per_pair` (only populated on **embedding** manifests) is the mean wall-clock time of one `method.distance(e1, e2)` call, measured by [eddde/methods/base.py](eddde/methods/base.py) `benchmark_distance` immediately after embedding via a time-budgeted sample (target ~1 s, bounded `[20, 2000]` pairs, 5-call warmup, seeded). It surfaces in `results/SUMMARY.md` as the `s/pair` column. The benchmark re-runs whenever embeddings rebuild; existing pre-benchmark manifests get a one-shot in-place upgrade in `runner._embed_if_stale` so adopting the field doesn't require cascade rebuilds.
+`distance_time_per_pair` (only populated on **embedding** manifests) is the mean wall-clock time of one `method.distance(e1, e2)` call, measured by [eddde/methods/base.py](eddde/methods/base.py) `benchmark_distance` immediately after embedding via a time-budgeted sample (target ~1 s, bounded `[20, 2000]` pairs, 5-call warmup, seeded). It surfaces in `results/SUMMARY.md` as the `s/pair` column. The benchmark re-runs whenever embeddings rebuild; existing pre-benchmark manifests get a one-shot in-place upgrade in `runner._embed_if_stale` so adopting the field doesn't require cascade rebuilds. For methods that override `distances()` only (B1–B7, B9, MUT-mean), `distance()` is the inherited 1×1 wrapper — the measured `s/pair` includes ~µs of wrapping overhead. That is the right number for fair per-pair comparison since it's exactly the cost a caller pays per pair; the batched path (used by experiments) does not pay it.
 
 ### Adding a method
 
-Create a class in `eddde/methods/baselines/` or `eddde/methods/muts/` with these attributes and methods:
+Subclass `Method` from [eddde/methods/base.py](eddde/methods/base.py) in `eddde/methods/baselines/` or `eddde/methods/muts/`:
 
 ```python
-id: str        # plan identifier verbatim — "B2", "MUT-mean", etc.
-version: str   # bump manually when embed or distance logic changes
-needs: Stage   # Stage.SMILES | Stage.CONFORMERS | Stage.ELEKTRONN_COEFFS
+from ..base import Method
 
-def embed_dataset(self, stage_data: dict) -> dict[str, Any]: ...
-def distance(self, e1, e2) -> float: ...  # smaller = more similar
+class MyMethod(Method):
+    id: str         # plan identifier verbatim — "B2", "MUT-mean", etc.
+    version: str    # bump manually when embed or distance logic changes
+    needs: Stage    # Stage.SMILES | Stage.CONFORMERS | Stage.ELEKTRONN_COEFFS
+
+    def embed_dataset(self, stage_data: dict) -> dict[str, Any]: ...
 ```
 
 Register the instance in [eddde/methods/__init__.py](eddde/methods/__init__.py). On next run, the runner embeds + runs all experiments automatically.
+
+**Distance contract — pick ONE of:**
+
+```python
+def distance(self, e1, e2) -> float:                      # per-pair
+def distances(self, embs_q: list, embs_c: list) -> ndarray  # batched
+```
+
+- Implement **`distances()`** when there's a natural batched form (BLAS vector distance, `BulkTanimotoSimilarity`, GPU kernel, batched OT solver). The framework calls it once with the full `(queries × candidates)` pair set; no pool, no IPC. This is the right choice for B1–B7, B9, MUT-mean today, and for any future learned/GPU method.
+- Implement **`distance()`** when the operation is inherently per-pair (e.g. B8 Gaussian shape alignment, exact-OT linear programs). The framework auto-parallelises across `multiprocessing.Pool` for large matrices via [eddde/methods/distance.py](eddde/methods/distance.py) `pairwise_matrix`.
+- Implement **both** only if you have a real reason — but you almost certainly don't. The unimplemented side is derived automatically (a 1×1 batched call for `distance`, or a serial nested loop for `distances`). Implementing both creates two sources of truth that can drift; the guard in `Method.__init_subclass__` requires at least one, but doesn't force both.
+
+If you forget to override either, class definition fails immediately with a clear error (`MyMethod must implement either distance() or distances()`).
+
+**Distance computation in experiments.** Experiments should never write their own pair loops. Call `pairwise_matrix(method, embeddings, query_ids, candidate_ids)` from [eddde/methods/distance.py](eddde/methods/distance.py). It dispatches to the batched override if present, else fans out across the multiprocessing pool for large matrices, else falls through to the inherited serial loop. `eddde.N_WORKERS` (overridable via `--num-workers`) controls the pool size; pool kicks in above `_PARALLEL_THRESHOLD = 50_000` pairs. This module is intentionally under `eddde.methods` rather than `eddde.experiments.retrieval_common` because matrix-shaped distance is shared by EXP-2 and the planned EXP-5/EXP-6, not just retrieval. A future `pair_distances(method, embeddings, pairs)` for explicit pair-list inputs (EXP-4 cliffs, EXP-5 pair sets) will live in the same module.
 
 **MUT training-data fairness:** Any learned component (on the embedding side, the distance side, or both) must be fit only on a held-out training split — never on the evaluation datasets (D3–D9). Early MUT variants (MUT-mean and siblings) keep the embedding non-trainable to characterise the raw coefficient signal first; trainable-embedding variants (attention pooling, graph-pooled GNN, etc.) are expected later and allowed under the same fairness rule. See [PROJECT_PLAN.md §3.2](PROJECT_PLAN.md) and [experimental_plan.md §2.6](experimental_plan.md) for the current variant list and rationale.
 
@@ -97,6 +114,8 @@ Register in [eddde/data/__init__.py](eddde/data/__init__.py).
 ### Adding an experiment
 
 Implement the `Experiment` protocol in `eddde/experiments/`. Declare `datasets: list[str]` for the dataset IDs it runs on. The `run(method, stage_data, embeddings, dataset_id, out)` method writes raw results and a `metrics.json` to `out/`. Register in [eddde/experiments/__init__.py](eddde/experiments/__init__.py).
+
+**Use `pairwise_matrix` for any multi-pair distance computation.** Never write your own `for q in queries: for c in candidates: method.distance(q, c)` loop — it bypasses the batched-override fast path for B1–B7, B9, MUT-mean (and future GPU methods), and also bypasses the multiprocessing pool that makes B8 (and future alignment-style / per-pair-OT methods) tractable at full-mode scale. The helper lives in [eddde/methods/distance.py](eddde/methods/distance.py); see "Distance computation in experiments" above for what it dispatches to. For experiments with explicit pair-list inputs (e.g. EXP-4 cliffs, EXP-5 bioisostere pair sets), a future `pair_distances(method, embeddings, pairs)` companion will land in the same module — raise it as a design point when implementing those experiments rather than reverting to ad-hoc loops.
 
 **Retrieval experiments** (EXP-3a/3b, and EXP-3c if/when implemented) share metric definitions, the raw-CSV schema, and most plots via [eddde/experiments/retrieval_common.py](eddde/experiments/retrieval_common.py). Use it for any new retrieval-style experiment to keep metrics consistent across them:
 - Math helpers: `logauc`, `bedroc`, `ef_at_percent`, `dcg_at_k`, `nanmean`, `mean_se`.

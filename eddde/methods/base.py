@@ -1,18 +1,35 @@
-"""Method protocol and embedding cache helpers.
+"""Method base class and embedding cache helpers.
 
 All methods (MUTs and baselines) share one interface:
   - id: stable identifier used in filenames and result columns
   - version: bump when embed or distance implementation changes
   - needs: highest dataset stage this method reads
   - embed_dataset(stage_data) -> dict[mol_id -> embedding]
-  - distance(e1, e2) -> float (smaller = more similar)
+
+Plus one of:
+  - distance(e1, e2) -> float — per-pair, for methods that have no
+    natural batched form (e.g. B8 Gaussian shape alignment). The
+    framework parallelises these across `multiprocessing.Pool` when
+    `eddde.methods.distance.pairwise_matrix` is called with a large
+    matrix.
+  - distances(embs_q, embs_c) -> ndarray — batched, for methods with a
+    vectorised BLAS / RDKit-bulk / GPU implementation (B1-B7, B9,
+    MUT-mean). The framework calls this directly and skips the worker
+    pool — a single C-level call usually beats any IPC-bound fanout.
+
+A subclass must implement at least one (enforced by __init_subclass__).
+The framework derives the other mechanically: a 1×1 batched call when
+only distances() is provided; a serial nested loop when only distance()
+is provided. This keeps a single source of truth per method (no drift
+between two implementations of the same semantics).
 """
 from __future__ import annotations
 
 import pickle
 import time
+from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 import numpy as np
 
@@ -27,14 +44,50 @@ def embedding_path(method_id: str, dataset_id: str) -> Path:
     return EMBEDDING_CACHE_ROOT / method_id / f"{dataset_id}.pkl"
 
 
-class Method(Protocol):
+class Method(ABC):
     id: str
     version: str
     needs: Stage
 
-    def embed_dataset(self, stage_data: dict) -> dict[str, Any]: ...
+    @abstractmethod
+    def embed_dataset(self, stage_data: dict) -> dict[str, Any]:
+        ...
 
-    def distance(self, e1: Any, e2: Any) -> float: ...
+    def distance(self, e1: Any, e2: Any) -> float:
+        """Per-pair distance.
+
+        Default: a 1×1 batched call via `distances()`. Subclasses that have
+        a per-pair-only implementation override this; subclasses with a
+        batched implementation typically leave it alone.
+        """
+        return float(self.distances([e1], [e2])[0, 0])
+
+    def distances(self, embs_q: list, embs_c: list) -> np.ndarray:
+        """Batched (queries × candidates) distance matrix.
+
+        Default: serial nested loop over `distance()`. Subclasses with a
+        vectorised / BLAS / GPU implementation override this; subclasses
+        that only have a per-pair `distance()` leave it alone — the
+        framework's `pairwise_matrix` detects the default and routes
+        through `multiprocessing.Pool` for large matrices.
+        """
+        return np.array(
+            [[self.distance(q, c) for c in embs_c] for q in embs_q],
+            dtype=float,
+        )
+
+    def __init_subclass__(cls, **kw: Any) -> None:
+        super().__init_subclass__(**kw)
+        # At least one of distance / distances must be overridden in the
+        # concrete subclass; otherwise both defaults call each other and
+        # any invocation infinite-recurses. Caught at class-definition
+        # time rather than at first call.
+        if (cls.distance is Method.distance
+                and cls.distances is Method.distances):
+            raise TypeError(
+                f"{cls.__name__} must implement either `distance()` or "
+                "`distances()` (or both)."
+            )
 
 
 def save_embeddings(path: Path, embeddings: dict[str, Any]) -> None:

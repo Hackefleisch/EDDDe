@@ -15,11 +15,13 @@ from typing import Any
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
+from scipy.spatial.distance import cdist
 
 from ...data.base import Stage
+from ..base import Method
 
 
-class USR:
+class USR(Method):
     id = "B9"
     version = "usr-rdkit-heavy-v1"
     needs = Stage.CONFORMERS
@@ -33,5 +35,11 @@ class USR:
             out[mol_id] = np.asarray(usr_vec, dtype=float)
         return out
 
-    def distance(self, e1: Any, e2: Any) -> float:
-        return 1.0 - rdMolDescriptors.GetUSRScore(e1.tolist(), e2.tolist())
+    def distances(self, embs_q: list[Any], embs_c: list[Any]) -> np.ndarray:
+        # GetUSRScore(a, b) = 1 / (1 + (1/n) * sum|a - b|), n = 12 for USR.
+        # Distance = 1 - sim = (d/n) / (1 + d/n) where d is Manhattan distance.
+        Q = np.stack(embs_q)
+        C = np.stack(embs_c)
+        n = Q.shape[1]
+        mean_abs = cdist(Q, C, "cityblock") / n
+        return mean_abs / (1.0 + mean_abs)

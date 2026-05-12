@@ -10,12 +10,18 @@ The full experimental design is in [PROJECT_PLAN.md](PROJECT_PLAN.md). Human-rea
 
 ## Architecture
 
-Every method — MUT or baseline — exposes the same two-function interface:
+Every method — MUT or baseline — subclasses `eddde.methods.base.Method` and implements `embed_dataset` plus exactly one of `distance` (per-pair) or `distances` (batched matrix). The framework derives the other automatically:
 
 ```python
-method.embed_dataset(stage_data)  # -> dict[mol_id -> embedding]
-method.distance(e1, e2)           # -> float  (smaller = more similar)
+class MyMethod(Method):
+    def embed_dataset(self, stage_data) -> dict[mol_id, embedding]: ...
+
+    # Pick one — the unimplemented side is auto-derived.
+    def distance(self, e1, e2) -> float: ...                          # per-pair
+    def distances(self, embs_q, embs_c) -> np.ndarray: ...            # batched
 ```
+
+Use `distances` whenever a vectorised C/BLAS/GPU implementation is natural (fingerprints with `BulkTanimotoSimilarity`, vector embeddings with `cdist`, future GPU/OT methods). Use `distance` only when the operation is inherently per-pair (B8 Gaussian shape alignment, exact-OT LPs); the framework auto-parallelises those across a process pool for large matrices. See [CLAUDE.md](CLAUDE.md) for details.
 
 The runner materializes dataset stages (SMILES → conformers → ElektroNN coefficients), caches embeddings per `(method, dataset)`, then runs each registered experiment against each registered method. Everything is content-addressed: an artifact is only recomputed when its producer version or an upstream output hash has changed.
 
@@ -30,7 +36,8 @@ eddde/
     pipeline.py              # build_up_to(dataset, stage), SMILES-stage element filter
     sources/                 # one file per dataset (S1–S8 + 9 WelQrate AIDs + 17 MUV assays implemented)
   methods/
-    base.py                  # Method protocol, embedding cache
+    base.py                  # Method ABC, embedding cache, distance benchmark
+    distance.py              # pairwise_matrix(): serial / multiprocessing / batched-override dispatch
     baselines/               # one file per baseline (B1–B7 + B9 USR implemented)
     muts/                    # one file per MUT condensing scheme (MUT-mean implemented)
   experiments/               # one file per experiment (EXP-1, EXP-2, EXP-3a, EXP-3b implemented; retrieval_common.py shared)
@@ -72,7 +79,7 @@ The runner checks every stage, embedding, and experiment result for staleness an
 
 ## Extending
 
-**Add a baseline or MUT** — create a class in `eddde/methods/baselines/` or `eddde/methods/muts/` with `id`, `version`, `needs` (a `Stage`), `embed_dataset`, and `distance`. Register it in `eddde/methods/__init__.py`.
+**Add a baseline or MUT** — subclass `Method` (from `eddde/methods/base.py`) in `eddde/methods/baselines/` or `eddde/methods/muts/`, setting `id`, `version`, `needs` (a `Stage`), and `embed_dataset`. Implement either `distance(e1, e2)` (per-pair) or `distances(embs_q, embs_c)` (batched matrix) — see the architecture note above for which to pick. Register in `eddde/methods/__init__.py`.
 
 **Add a dataset** — subclass `Dataset` in `eddde/data/sources/`, implement `build_smiles` (and `build_native_conformers` if the dataset ships 3D structures). Register in `eddde/data/__init__.py`.
 

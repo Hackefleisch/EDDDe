@@ -37,6 +37,7 @@ from .. import SEED
 from ..cache import hash_file, is_stale, write_manifest
 from ..data.base import Stage
 from ..data.sources.muv import MUV_AIDS
+from ..methods.distance import pairwise_matrix
 from . import retrieval_common as rc
 from .base import result_dir
 
@@ -59,7 +60,7 @@ def _seeded_rng(dataset_id: str, draw_idx: int) -> np.random.Generator:
 
 class Exp3bMUV:
     id = "EXP-3b"
-    version = "v1"
+    version = "v2"
     datasets = MUV_DATASET_IDS
 
     metric_direction = {
@@ -83,6 +84,21 @@ class Exp3bMUV:
         seed_bedroc: list[float] = []
         seed_ef1:    list[float] = []
 
+        if active_ids:
+            draw_queries: list[str] = [
+                str(_seeded_rng(dataset_id, d).choice(active_ids))
+                for d in range(N_QUERY_DRAWS)
+            ]
+            # One batched matrix call: (5 queries × n mols). Pool overhead is
+            # paid once per target instead of five times, and full-mode MUV
+            # (~15k mols × 5 queries = 75k pairs) crosses the parallelism
+            # threshold cleanly.
+            D = pairwise_matrix(method, embeddings, draw_queries, mol_ids)
+            mol_col_of = {m: j for j, m in enumerate(mol_ids)}
+        else:
+            draw_queries = []
+            D = None
+
         for draw_idx in range(N_QUERY_DRAWS):
             if not active_ids:
                 seed_aucroc.append(float("nan"))
@@ -90,14 +106,12 @@ class Exp3bMUV:
                 seed_ef1.append(float("nan"))
                 continue
 
-            rng = _seeded_rng(dataset_id, draw_idx)
-            query_id = str(rng.choice(active_ids))
-
-            candidates = [m for m in mol_ids if m != query_id]
-            distances = np.array([
-                method.distance(embeddings[query_id], embeddings[cid])
-                for cid in candidates
-            ])
+            query_id = draw_queries[draw_idx]
+            self_col = mol_col_of[query_id]
+            row = D[draw_idx]
+            cand_mask = np.arange(len(mol_ids)) != self_col
+            candidates = [mol_ids[j] for j in range(len(mol_ids)) if j != self_col]
+            distances = row[cand_mask]
             order = np.argsort(distances, kind="stable")
 
             n_total = len(candidates)

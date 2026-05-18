@@ -98,16 +98,28 @@ class ESimShape(Method):
 class ESimO3A(Method):
     """B11-o3a: Open3DAlign atom-correspondence alignment + espsim combo.
 
-    Known characteristic: for symmetric molecules (e.g. aniline, benzene)
-    O3A can pick the symmetry-mapped atom correspondence rather than the
-    identity, producing a 180° flip and a non-zero self-distance (~0.05-
-    0.10). rdShapeAlign (B11-shape) has no atom correspondence and
-    doesn't suffer this -- the contrast is exactly the signal isolating
-    the two variants was meant to capture.
+    Uses Crippen-O3A (`rdMolAlign.GetCrippenO3A`, Wildman-Crippen LogP/MR
+    atomic contributions) rather than MMFF-O3A. Empirically ~2x faster
+    on drug-like molecules: MMFF-O3A's correspondence search scales
+    poorly with atom count (~24 ms on 70-atom drugs), and pre-caching
+    MMFF properties saves nothing because the bottleneck is inside the
+    C++ optimiser, not the setup. Crippen-O3A produces identical
+    alignments on substituent-conserved series (e.g. EXP-2 Hammett
+    benzoic acids, delta <= 0.001 vs MMFF) and shifts moderately on
+    diverse drug-like pairs (Spearman 0.89 vs MMFF), so retrieval ranks
+    can move a place or two -- worth the 2x speedup since the EXP-2
+    win that justifies B11-o3a's place in the panel is preserved.
+
+    Known characteristic: any atom-correspondence aligner can pick a
+    symmetry-mapped mapping (e.g. flipping aniline 180 degrees across
+    the C-N axis), producing a small non-zero self-distance for
+    symmetric molecules. rdShapeAlign (B11-shape) has no atom
+    correspondence and doesn't suffer this -- isolating that contrast
+    is exactly what shipping both variants is for.
     """
 
     id = "B11-o3a"
-    version = "espsim-o3a-mmff-v2"
+    version = "espsim-crippen-o3a-mmff-v3"
     needs = Stage.CONFORMERS
 
     embed_dataset = staticmethod(_embed_conformer_copies)
@@ -115,13 +127,5 @@ class ESimO3A(Method):
     def distance(self, e1: Any, e2: Any) -> float:
         ref = e1
         prb = Chem.Mol(e2)
-        # GetO3A needs MMFF atom types. They occasionally fail for
-        # unusual atom environments -- fall back to Crippen O3A, which
-        # uses LogP/MR contributions and parameterises everything in our
-        # supported {H,C,N,O,F,S,Cl} set.
-        try:
-            o3a = rdMolAlign.GetO3A(prb, ref)
-        except (ValueError, RuntimeError):
-            o3a = rdMolAlign.GetCrippenO3A(prb, ref)
-        o3a.Align()
+        rdMolAlign.GetCrippenO3A(prb, ref).Align()
         return 1.0 - _espsim_combo(prb, ref)

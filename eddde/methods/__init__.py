@@ -13,7 +13,7 @@ from .baselines.usr import USR
 from .baselines.usrcat import USRCAT
 from .baselines.esim import ESimShape, ESimO3A
 from .baselines.bcl_mol2d import BCLMol2D
-from .muts.mean import MutMean, MutMeanCosine, MutMeanMax
+from .muts.mean import MutMean, MutMeanCosine, MutMeanMax, MutMeanPerElement, MutMeanPerElementSum
 
 
 METHODS: dict[str, Method] = {}
@@ -47,3 +47,5 @@ else:
 _register(MutMean())
 _register(MutMeanCosine())
 _register(MutMeanMax())
+_register(MutMeanPerElement())
+_register(MutMeanPerElementSum())

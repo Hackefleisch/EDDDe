@@ -10,6 +10,7 @@ from .baselines.rdkit_descriptors import RDKitDescriptors
 from .baselines.shape_align import GaussianShapeAlign
 from .baselines.usr import USR
 from .baselines.usrcat import USRCAT
+from .baselines.esim import ESimShape, ESimO3A
 from .muts.mean import MutMean
 
 
@@ -32,4 +33,6 @@ _register(RDKitDescriptors())
 _register(GaussianShapeAlign())
 _register(USR())
 _register(USRCAT())
+_register(ESimShape())
+_register(ESimO3A())
 _register(MutMean())

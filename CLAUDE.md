@@ -13,12 +13,13 @@ This repo's job is twofold:
 
 ## Planning Documents — Source of Truth
 
-Two planning files drive all work. Read them before proposing design changes:
+Two planning files drive all work, plus per-strain implementation references where needed. Read them before proposing design changes:
 
-- [PROJECT_PLAN.md](PROJECT_PLAN.md) — **AI-optimized spec**. Structured tables: 17 baseline methods (B1–B17), 9 datasets (D1–D9), 6 experiments (EXP-1..EXP-6), ~20 metric definitions (M-*), output artifact layout, success criteria. Canonical reference — when in doubt about what to build, check here first.
+- [PROJECT_PLAN.md](PROJECT_PLAN.md) — **AI-optimized spec**. Structured tables: baseline methods (B1–B18), 9 datasets (D1–D9), 6 experiments (EXP-1..EXP-6), ~20 metric definitions (M-*), MUT five-strain taxonomy (§3.2), output artifact layout, success criteria. Canonical reference — when in doubt about what to build, check here first.
 - [experimental_plan.md](experimental_plan.md) — **Human-readable rationale**. Narrative version of the same plan explaining the "why" behind method choices, expected behaviors, and known dataset biases.
+- [docs/](docs/) — per-strain implementation references. Created on demand when a strain has collaborator-authored math, removed-source recipes worth preserving, or load-bearing implementation pitfalls (SH conventions, solver math, output ordering) that don't fit in the plan tables. Currently: `strain_b_e3nn_central_atom.md`, `strain_c_vector_valued_gw.md`, `strain_d_topological.md`.
 
-If a user asks for a change to the plan, update both files — structured for machine lookup, prose for reasoning.
+If a user asks for a change to the plan, update both planning files — structured for machine lookup, prose for reasoning — and the relevant `docs/` file if the change touches strain implementation details.
 
 ## Environment
 

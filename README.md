@@ -2,58 +2,15 @@
 
 A benchmarking framework for electron-density-based molecular similarity. The central question: do distances derived from DFT-level electron density representations track functional molecular similarity better than established methods?
 
-[ElektroNN](https://github.com/Hackefleisch/ElektroNN) produces per-atom coefficient matrices of shape `(n_atoms, 127)` — basis-function fits to the electron density computed at DFT level. EDDDe takes those matrices, condenses them into fixed-size embeddings via various schemes ("methods under test", MUTs), and benchmarks the resulting distances against 17 established baselines across 6 experiments covering chemical series smoothness, electronic sensitivity, virtual screening retrieval, activity cliffs, bioisostere recognition, and scaffold hopping.
+[ElektroNN](https://github.com/Hackefleisch/ElektroNN) produces per-atom coefficient matrices of shape `(n_atoms, 127)` — basis-function fits to the electron density computed at DFT level. EDDDe takes those matrices, condenses them into fixed-size embeddings via various schemes ("methods under test", MUTs), and benchmarks the resulting distances against established baselines across six experiments covering chemical-series smoothness, electronic sensitivity, virtual-screening retrieval, activity cliffs, bioisostere recognition, and scaffold hopping.
 
-The full experimental design is in [PROJECT_PLAN.md](PROJECT_PLAN.md). Human-readable rationale is in [experimental_plan.md](experimental_plan.md).
-
----
-
-## Architecture
-
-Every method — MUT or baseline — subclasses `eddde.methods.base.Method` and implements `embed_dataset` plus exactly one of `distance` (per-pair) or `distances` (batched matrix). The framework derives the other automatically:
-
-```python
-class MyMethod(Method):
-    def embed_dataset(self, stage_data) -> dict[mol_id, embedding]: ...
-
-    # Pick one — the unimplemented side is auto-derived.
-    def distance(self, e1, e2) -> float: ...                          # per-pair
-    def distances(self, embs_q, embs_c) -> np.ndarray: ...            # batched
-```
-
-Use `distances` whenever a vectorised C/BLAS/GPU implementation is natural (fingerprints with `BulkTanimotoSimilarity`, vector embeddings with `cdist`, future GPU/OT methods). Use `distance` only when the operation is inherently per-pair (B8 Gaussian shape alignment, exact-OT LPs); the framework auto-parallelises those across a process pool for large matrices. See [CLAUDE.md](CLAUDE.md) for details.
-
-The runner materializes dataset stages (SMILES → conformers → ElektroNN coefficients), caches embeddings per `(method, dataset)`, then runs each registered experiment against each registered method. Everything is content-addressed: an artifact is only recomputed when its producer version or an upstream output hash has changed.
-
-```
-eddde/
-  __init__.py                # project constants (SEED, N_WORKERS, BCL_BIN), local_settings resolver
-  local_settings.example.py  # template for eddde/local_settings.py (gitignored, per-machine config)
-  cache.py                   # manifest-based staleness checks
-  runner.py                  # main() — stages → embeddings → experiments → SUMMARY.md
-  data/
-    base.py                  # Stage enum, Dataset base class
-    conformers.py            # RDKit ETKDGv3 + MMFF94, lowest-energy single conformer
-    elektronn_runner.py      # ElektroNN integration, model cache, supported-element set
-    pipeline.py              # build_up_to(dataset, stage), SMILES-stage element filter
-    sources/                 # one file per dataset (S1–S8 + 9 WelQrate AIDs + 17 MUV assays implemented)
-  methods/
-    base.py                  # Method ABC, embedding cache, distance benchmark
-    distance.py              # pairwise_matrix(): serial / multiprocessing / batched-override dispatch
-    baselines/               # one file per baseline (B1–B11, B18 implemented; B12–B17 pending)
-    muts/                    # one file per MUT condensing scheme (MUT-mean implemented)
-  experiments/               # one file per experiment (EXP-1, EXP-2, EXP-3a, EXP-3b implemented; retrieval_common.py shared)
-```
-
-Each cached artifact has a sidecar `*.manifest.json` storing producer version, input hashes, compute time, and accumulated upstream cost — so the full pipeline cost for any result is an O(1) lookup. `results/SUMMARY.md` is regenerated on every run with per-experiment metric tables and a cross-experiment average-rank leaderboard.
-
-**Element filter.** The SMILES stage applies a project-wide hard filter dropping molecules whose SMILES contains an element outside ElektroNN's supported basis set (`{H, C, N, O, F, S, Cl}`). This ensures every method — including SMILES-only baselines — sees the same molecule set. See [CLAUDE.md](CLAUDE.md) for details.
+Source of truth for the experimental design: [PROJECT_PLAN.md](PROJECT_PLAN.md) (structured spec) and [experimental_plan.md](experimental_plan.md) (narrative rationale). Per-strain implementation references: [docs/](docs/). Always-fresh per-method numbers: [results/SUMMARY.md](results/SUMMARY.md).
 
 ---
 
 ## Installation
 
-Requires Python ≥ 3.10 and [uv](https://github.com/astral-sh/uv). The `elektronn` dependency is fetched via SSH from its private repository, so SSH access to `git@github.com:Hackefleisch/ElektroNN` is required.
+Requires Python ≥ 3.10 and [uv](https://github.com/astral-sh/uv). The `elektronn` dependency is fetched via SSH from a private repository, so SSH access to `git@github.com:Hackefleisch/ElektroNN` is required.
 
 ```bash
 git clone git@github.com:Hackefleisch/EDDDe.git
@@ -64,192 +21,96 @@ uv pip install -e .
 
 ### Per-machine config: `eddde/local_settings.py`
 
-Anything machine-specific (today: the path to optional external binaries) lives in `eddde/local_settings.py`, which is gitignored. Copy the template once after install:
+Anything machine-specific (today: paths to optional external binaries) lives in `eddde/local_settings.py`, which is gitignored. Copy the template once after install:
 
 ```bash
 cp eddde/local_settings.example.py eddde/local_settings.py
 ```
 
-then edit only the lines you need. **Everything in this file is optional**: when a value is `None` or absent, the dependent method silently does not register — every other method runs unaffected, no errors, no empty result columns.
+Everything in this file is optional. When a value is `None` or absent, the dependent method silently does not register — every other method runs unaffected, no empty result columns. Adding new optional external deps follows the `_setting(attr_name)` pattern in [eddde/__init__.py](eddde/__init__.py).
 
 ### Optional: BCL toolkit for B18 (BCL::Mol2D)
 
-B18 calls the closed-source [BCL](https://github.com/BCLCommons/bcl) C++ binary. The license forbids redistribution, so it can't ship via uv or be vendored in the repo. To enable B18:
+B18 calls the closed-source [BCL](https://github.com/BCLCommons/bcl) C++ binary. The license forbids redistribution, so it can't ship via uv or be vendored. To enable B18:
 
-1. Download the prebuilt installer from [BCLCommons/bcl releases](https://github.com/BCLCommons/bcl/releases) (`bcl-4.3.1-Linux-x86_64.sh` at the time of writing), make it executable, and run it once. It self-extracts to a directory containing `bcl.exe`.
-2. In `eddde/local_settings.py`, set:
-   ```python
-   BCL_BIN = "/abs/path/to/bcl-4.3.1-Linux-x86_64/bcl.exe"
-   ```
+1. Download the prebuilt installer from [BCLCommons/bcl releases](https://github.com/BCLCommons/bcl/releases) (`bcl-4.3.1-Linux-x86_64.sh` at the time of writing), make it executable, and run it once.
+2. In `eddde/local_settings.py`, set `BCL_BIN = "/abs/path/to/bcl.exe"`.
 
-Skip this step entirely if you don't need B18. The startup will print one line — `[methods] B18 (BCL::Mol2D) skipped: BCL_BIN not set...` — and proceed without it.
+Skip this step entirely if you don't need B18; startup prints one line noting the skip and proceeds.
 
-The same `_setting(attr_name)` helper in [eddde/__init__.py](eddde/__init__.py) is the reusable hook for any future optional external dep.
+---
 
 ## Running
 
 ```bash
 python -m eddde                      # full run
-python -m eddde --test-mode          # dev mode: randomly downsample every dataset to ≤1000 mols
+python -m eddde --test-mode          # dev mode: downsample every dataset to ≤1000 mols
 python -m eddde --num-workers 8      # cap the CPU process pool (default: cpu_count)
 python -m eddde --batch-size 16      # smaller GPU batch if ElektroNN OOMs
 ```
 
-The runner checks every stage, embedding, and experiment result for staleness and runs only what needs updating. Adding a new method, dataset, or experiment and re-running produces incremental results without touching anything already cached.
+The runner checks every stage, embedding, and experiment for staleness and rebuilds only what changed. Adding a new method, dataset, or experiment and re-running produces incremental results without touching anything already cached.
 
-**CLI flags.** `--batch-size N` controls ElektroNN's GPU batch size (default 32). `--dataloader-workers N` controls torch DataLoader workers for ElektroNN inference (default 0). `--num-workers N` controls the multiprocessing pool used for SMILES filtering and conformer generation (default = `cpu_count`). `--test-mode` (with optional `--test-size N`, default 1000) randomly downsamples every dataset at the SMILES stage — seeded with the project SEED so the sample is stable across runs and downstream caches don't rebuild on every test invocation. Toggling test-mode ↔ full-mode invalidates the SMILES cache, so pick a mode and stay in it for fast iteration.
+**Flags.** `--batch-size N` (ElektroNN GPU batch, default 32). `--dataloader-workers N` (torch DataLoader workers, default 0). `--num-workers N` (process pool for SMILES filtering and conformer generation, default = `cpu_count`). `--test-mode` with optional `--test-size N` (default 1000) — seeded with the project SEED so the subsample is stable; toggling test ↔ full invalidates the SMILES cache.
 
-**Compute expectations.** A cold run (no caches) on the full dataset suite can take up to a day. Conformer generation and the project-wide SMILES filters are parallelised across `eddde.N_WORKERS` (defaults to `os.cpu_count()`, defined in [eddde/__init__.py](eddde/__init__.py) and overridable via `--num-workers`), but conformer generation remains the dominant cost on large datasets. ElektroNN inference runs on GPU when available; the default `BATCH_SIZE = 32` in [eddde/data/elektronn_runner.py](eddde/data/elektronn_runner.py) requires roughly 6 GB of GPU memory — lower it if you hit OOM, raise it if you have headroom.
+**Compute expectations.** A cold full run can take up to a day. Conformer generation dominates the CPU cost; ElektroNN inference runs on GPU (default batch needs ~6 GB).
+
+---
+
+## Project layout
+
+```
+eddde/
+  __init__.py                # project constants (SEED, N_WORKERS, BCL_BIN), local_settings resolver
+  local_settings.example.py  # template for per-machine config (copy to local_settings.py)
+  cache.py                   # manifest-based staleness checks
+  runner.py                  # main() — stages → embeddings → experiments → SUMMARY.md
+  data/
+    base.py                  # Stage enum, Dataset base class
+    conformers.py            # RDKit ETKDGv3 + MMFF94, lowest-energy single conformer
+    elektronn_runner.py      # ElektroNN integration, model cache, supported-element set
+    pipeline.py              # build_up_to(dataset, stage), project-wide SMILES filters
+    sources/                 # one file per dataset
+  methods/
+    base.py                  # Method ABC, embedding cache, distance benchmark
+    distance.py              # pairwise_matrix(): serial / multiprocessing / batched-override dispatch
+    baselines/               # one file per baseline
+    muts/                    # one file per MUT (five-strain taxonomy; see PROJECT_PLAN.md §3.2)
+  experiments/               # one file per experiment; retrieval_common.py shared
+scripts/                     # one-off utilities (e.g. draw_dataset.py)
+docs/                        # per-strain implementation references (created on demand)
+```
+
+Each cached artifact has a sidecar `*.manifest.json` recording producer version, input hashes, compute time, and accumulated upstream cost. `results/SUMMARY.md` is regenerated on every run with per-experiment metric tables and a cross-experiment average-rank leaderboard.
+
+**Element filter.** The SMILES stage applies a project-wide hard filter dropping molecules whose SMILES contains an element outside ElektroNN's supported basis set (`{H, C, N, O, F, S, Cl}`), so every method — including SMILES-only baselines — sees the same molecule set. See [CLAUDE.md](CLAUDE.md) for details.
 
 ---
 
 ## Extending
 
-**Add a baseline or MUT** — subclass `Method` (from `eddde/methods/base.py`) in `eddde/methods/baselines/` or `eddde/methods/muts/`, setting `id`, `version`, `needs` (a `Stage`), and `embed_dataset`. Implement either `distance(e1, e2)` (per-pair) or `distances(embs_q, embs_c)` (batched matrix) — see the architecture note above for which to pick. Register in `eddde/methods/__init__.py`.
+**Add a baseline or MUT** — subclass `Method` (from [eddde/methods/base.py](eddde/methods/base.py)) in `eddde/methods/baselines/` or `eddde/methods/muts/`. Set `id`, `version`, `needs` (a `Stage`), implement `embed_dataset`, and pick exactly one of `distance(e1, e2)` (per-pair) or `distances(embs_q, embs_c)` (batched matrix). The framework derives the other automatically and dispatches across a process pool for large per-pair matrices. Register in `eddde/methods/__init__.py`. MUTs belong to one of the five strains spec'd in [PROJECT_PLAN.md §3.2](PROJECT_PLAN.md); strain-specific implementation references (when needed) live in [docs/](docs/).
 
 **Add a dataset** — subclass `Dataset` in `eddde/data/sources/`, implement `build_smiles` (and `build_native_conformers` if the dataset ships 3D structures). Register in `eddde/data/__init__.py`.
 
-**Add an experiment** — implement the `Experiment` protocol in `eddde/experiments/`, declare `datasets` and `metric_direction`. Optionally declare `metric_datasets` to specify which datasets each metric applies to (used by the SUMMARY writer for accurate coverage fractions). Register in `eddde/experiments/__init__.py`.
+**Add an experiment** — implement the `Experiment` protocol in `eddde/experiments/`. Declare `datasets`, `metric_direction`, and optionally `metric_datasets`. Register in `eddde/experiments/__init__.py`. Retrieval-style experiments share helpers via `retrieval_common.py`.
 
 New dependencies go in `pyproject.toml` — don't silently assume they are present.
 
-**Visualize a dataset** — render a 2D molecule grid for any registered dataset:
+**Visualize a dataset** — render a 2D molecule grid:
 
 ```bash
 python scripts/draw_dataset.py <dataset_id> [--out <path>] [--cols <n>] [--mol-size <px>]
 ```
 
-Builds the SMILES stage if needed (cached) and saves a PNG grid to `figures/<dataset_id>_molecules.png` by default. Example: `python scripts/draw_dataset.py S6 --cols 3`
-
----
-
-## Current results
-
-> ⚠️ **The numbered tables below are an older snapshot kept here for shape-of-the-data illustration. The authoritative, always-fresh numbers live in [`results/SUMMARY.md`](results/SUMMARY.md), regenerated on every `python -m eddde` run.** Recent additions (B10 USRCAT, B11-shape, B11-o3a, B18 BCL::Mol2D) and the EXP-2/EXP-3 re-runs that followed the B11-o3a alignment-engine switch from MMFF-O3A to Crippen-O3A are reflected there but not yet here.
-
-Results below are from an earlier run with B1–B7, B9, and MUT-mean. All results are fully reproducible: `python -m eddde` regenerates everything from scratch.
-
-### EXP-1 — Homologous Series Smoothness (S1–S5)
-
-Tests whether distances grow monotonically and smoothly with chain length across five homologous series (n-alkanes, n-alkanols, n-alkanoic acids, n-alkylamines, polyethylene glycols). Metrics: M-MONO (Spearman ρ with chain-length gap, ↑), M-SMOOTH (std dev of consecutive-distance ratios, ↓), M-LIN (R² of d vs chain position, ↑).
-
-| Method | M-MONO | M-SMOOTH | M-LIN | Avg rank | s/mol |
-| --- | --- | --- | --- | --- | --- |
-| B7 | 0.862±0.033 | 0.679±0.135 | 0.831±0.025 | 2.00 | 0.0024 |
-| MUT-mean | 0.678±0.017 | 0.222±0.038 | 0.840±0.010 | 2.00 | 0.558 |
-| B5 | 0.711±0.027 | 0.105±0.020 | 0.582±0.157 | 2.33 | 0.000346 |
-| B1–B6 | 0.47–0.57 | — | 0.30–0.63 | 5–8 | <0.001 |
-
-MUT-mean achieves the best M-LIN score (0.840) and competitive M-MONO, but distances are smooth rather than linear — M-SMOOTH well below the B7 value. Topological fingerprints (B1–B6) show zero M-SMOOTH signal (their distance functions saturate as local neighborhoods become self-similar in long chains).
-
-### EXP-2 — Functional Group Substitution Sensitivity (S6–S8)
-
-Tests whether embeddings reflect electronic character of substituents across three probes: monosubstituted benzenes (S6, conjugated), monosubstituted cyclohexanes (S7, aliphatic control), and para-substituted benzoic acids with known Hammett σ_para values (S8). Metrics: M-HAMMETT-PAIR (Spearman ρ between |Δσ| and pairwise distance, ↑), M-HAMMETT-ABS (Spearman ρ between |σ| and distance from H-compound, ↑), M-SILHOUETTE-S6 (donor/acceptor/neutral clustering on conjugated scaffold, ↑), M-SILHOUETTE-S7 (same on aliphatic control — want low clustering, ↓).
-
-| Method | M-HAMMETT-PAIR | M-HAMMETT-ABS | M-SILHOUETTE-S6 | M-SILHOUETTE-S7 | Avg rank | s/mol |
-| --- | --- | --- | --- | --- | --- | --- |
-| B4 | 0.400 | 0.713 | 0.066 | 0.041 | 3.00 | 0.00349 |
-| B1 | 0.312 | 0.788 | 0.107 | 0.093 | 3.00 | 0.00666 |
-| B2 | 0.260 | 0.788 | 0.081 | 0.067 | 3.25 | 0.00444 |
-| B3 | 0.336 | 0.750 | 0.053 | 0.162 | 4.50 | 0.00298 |
-| B7 | 0.233 | 0.669 | 0.215 | 0.240 | 5.00 | 0.00355 |
-| B6 | −0.048 | 0.773 | 0.015 | 0.061 | 5.25 | 0.00471 |
-| B5 | 0.218 | 0.604 | 0.160 | 0.171 | 5.75 | 0.00352 |
-| MUT-mean | 0.228 | 0.285 | 0.027 | 0.082 | 6.25 | 0.485 |
-
-EXP-2 results are a first look with only the simplest MUT variant (atom-mean pooling). MUT-mean does not yet show an advantage on electronic sensitivity — topological fingerprints outperform it on M-HAMMETT-PAIR. This is expected to improve as more informative condensing schemes (irrep-weighted, attention-pooled) are implemented. The Hammett scatter plots are the primary diagnostic at this stage.
-
-Note: Br-containing molecules are dropped by the element filter (see above), reducing S6 to 11 and S8 to 9 compounds.
-
-### EXP-3a — WelQrate Retrieval (9 PubChem AIDs)
-
-Provisional — the analysis pass has not been fully validated yet. Retrieval against the WelQrate scaffold-split pool (valid + test, 5 seeds). Topological fingerprints lead, with B5 (Atom Pair) and B3 (FCFP4) at the top. MUT-mean trails the topology pack on every metric but remains comparable to RDKit descriptors (B7) and USR (B9). Numbers are mean±SE across the 9 targets.
-
-Table dropped: EXP-3a's k-NN classification task has been removed (see §5.3 of PROJECT_PLAN.md for the rationale), so the previous numbers are stale and the Avg-rank column will refresh once `EXP-3a` is rerun. The qualitative ordering on the retained metrics (M-LOGAUC, M-BEDROC20, M-EF1, M-DCG100) is unchanged.
-
-### EXP-3b — MUV Retrieval (17 PubChem AIDs)
-
-Retrieval against the per-target pool, 5 deterministically-seeded random query draws per target. MUV is constructed to defeat analog-based similarity, so absolute numbers are expected to be much lower than EXP-3a — and they are: AUC-ROC tops out at 0.60 for the best topological fingerprint.
-
-| Method | M-AUCROC | M-BEDROC20 | M-EF1 | Avg rank | s/mol |
-| --- | --- | --- | --- | --- | --- |
-| B6 | 0.597±0.014 | 0.151±0.018 | 5.040±0.908 | 2.00 | 0.00162 |
-| B1 | 0.551±0.019 | 0.140±0.017 | 5.284±1.029 | 2.67 | 0.00157 |
-| B5 | 0.601±0.021 | 0.148±0.018 | 4.344±0.744 | 2.67 | 0.00161 |
-| B3 | 0.556±0.018 | 0.139±0.017 | 4.963±1.126 | 3.67 | 0.00167 |
-| B2 | 0.544±0.019 | 0.137±0.018 | 5.110±1.121 | 4.67 | 0.00158 |
-| B4 | 0.550±0.019 | 0.119±0.012 | 3.551±0.582 | 5.67 | 0.00198 |
-| B9 | 0.547±0.013 | 0.096±0.006 | 1.583±0.272 | 7.00 | 0.0143 |
-| MUT-mean | 0.508±0.020 | 0.089±0.010 | 2.159±0.452 | 8.00 | 0.0247 |
-| B7 | 0.527±0.013 | 0.074±0.007 | 1.218±0.191 | 8.67 | 0.0065 |
-
-**Observations and anomalies.**
-
-- **MUT-mean is essentially random at AUC level (0.508).** Expected for the simplest pooling scheme against property-matched decoys — a 127-dim atom-mean captures mostly global molecular character, which is exactly what MUV's decoy construction matches on. The same failure mode hits B7 (RDKit 200-d descriptors, AUC 0.527).
-- **MUT-mean's EF1 (2.16) outranks B7's (1.22) and B9's (1.58).** So even where overall ranking is uninformative, the very top of MUT-mean's ranking carries some signal — more than RDKit descriptors or USR shape moments do. This is the kind of partial signal a smarter condensing scheme should be able to amplify.
-- **Three targets where MUT-mean is sub-random** (AUC < 0.43): MUV_644 (0.404), MUV_689 (0.422), MUV_712 (0.377). Mild anti-correlation, not just noise — but the 5-seed × 30-active design means each of these is roughly five queries against ~15 000 candidates, so a single bad seed dominates. Worth re-checking once more MUT variants exist.
-- **Bimodal targets MUV_644, MUV_712, MUV_846**: MUT-mean has near-random or sub-random AUC but high EF1 (4.14, 2.76, 5.71 respectively). The top of the ranking is enriched with actives while the bulk of actives end up *low* in the ranking — i.e. the embedding recognises some active subclusters strongly and others not at all. This is a more interesting failure mode than "uniformly random" and could be diagnostic of which chemotypes the mean-pooled coefficients actually distinguish.
-- **MUV_737 is the standout positive case for MUT-mean**: AUC 0.742, BEDROC20 0.169, EF1 4.44 — matching B5/B6 on a target where most baselines also do well. Worth looking at what makes 737 different (chemotype range, active fragment patterns) when characterising why the embedding fires here and not elsewhere.
-- **Four targets with EF1 = 0.00** for MUT-mean (MUV_689, MUV_832, MUV_858, MUV_859): zero actives in the top 1 % across all 5 seeds. Random expectation is ≈0.3 actives per query, so consistently hitting zero is a real anti-signal for these targets, not just sampling variance.
-
-None of the headline numbers are out of the ordinary for MUV. Pre-MUT-era reports of fingerprints on MUV typically show AUCs in the 0.55–0.65 range and BEDROC20 around 0.1–0.2 (Rohrer & Baumann 2009; Riniker & Landrum 2013), which matches what we observe. The interesting signal is in the *shape* of MUT-mean's failure, not its magnitude.
-
----
-
-## Recent progress
-
-Latest additions, most recent first. See [`results/SUMMARY.md`](results/SUMMARY.md) for the current numbers any of these produce.
-
-**Baselines**
-- **B10 USRCAT** — RDKit's 60-d pharmacophoric extension of B9 USR; inverse-Manhattan distance.
-- **B11 eSim** (two variants) — open-source equivalent of Jain's proprietary eSim via the [`espsim`](https://github.com/hesther/espsim) package, combining shape and electrostatic-potential similarity with MMFF charges on aligned poses.
-  - **B11-shape** uses `rdShapeAlign.AlignMol` (Gaussian-shape pose search, same engine as B8).
-  - **B11-o3a** uses `rdMolAlign.GetCrippenO3A` (atom-correspondence alignment). We benchmarked MMFF-O3A and Crippen-O3A and switched to Crippen as primary: ~1.8× faster on drug-like libraries with identical alignments on substituent-conserved series, *and* widens the EXP-2 S6−S7 silhouette specificity gap from −0.079 (anti-specific) to +0.206 (properly specific).
-  - Hydrocarbons trigger an `espsim` ValueError when the Carbo denominator vanishes; we degrade gracefully to shape-only similarity for those pairs (preserves `d(x,x)=0`; revisit if it fires on polar↔non-polar pairs in future drug-like datasets).
-- **B18 BCL::Mol2D** — 574-d atom-environment count vector from BCL's `UMol2D` descriptor (published defaults: atom-type encoding, height=1). Cosine distance. Closed-source binary, soft-skipped if not configured — see Installation.
-
-**Framework**
-- **Per-machine config via `eddde/local_settings.py`** (gitignored, template in `local_settings.example.py`). Optional external deps register conditionally; missing config skips the dependent method silently instead of erroring or producing empty result columns.
-- **EXP-3a/3b plot acceleration via curve-summary cache**. The TPR-vs-log-FPR aggregation now persists as a per-(method, dataset) `enrichment_curve.npz` alongside `retrieval_rankings.csv`. Adding a new method only re-aggregates that method's CSV instead of re-reading all of them, which previously dominated plot generation on large retrieval datasets. The cumulative-recall and rank-distribution figures were dropped (information already conveyed by enrichment curves + heatmaps + raw CSVs).
-
 ---
 
 ## Status
 
-| Component | Status |
-|---|---|
-| Framework: runner, caching, manifest chain, SUMMARY writer | done |
-| **Baselines** | |
-| B1 ECFP4, B2 ECFP6, B3 FCFP4 | done |
-| B4 MACCS keys, B5 Atom Pair, B6 Topological Torsion | done |
-| B7 RDKit 2048-bit 2D descriptors (cosine distance) | done |
-| B8 Gaussian shape + color Tanimoto (RDKit `rdShapeAlign`, ROCS-equivalent) | done |
-| B9 USR (12-d, RDKit, inverse-Manhattan distance) | done |
-| B10 USRCAT (60-d, RDKit, inverse-Manhattan distance) | done |
-| B11-shape eSim with shape-driven alignment (`rdShapeAlign.AlignMol` + `espsim`) | done |
-| B11-o3a eSim with atom-correspondence alignment (`rdMolAlign.GetCrippenO3A` + `espsim`) | done |
-| B18 BCL::Mol2D atom-environment descriptor (574-d count vector, cosine; **requires BCL binary**, see Installation) | done (optional — soft-skip when `BCL_BIN` unset) |
-| B12 Mol2vec, B13 Uni-Mol, B14 Chemprop | pending |
-| B15–B17 (QM-descriptor baselines: Coulomb matrix, SOAP, ACSF) | pending |
-| **MUTs** | |
-| MUT-mean (atom-mean → 127-d vector, Euclidean distance) | done |
-| MUT-mean-cosine, MUT-mean-irrep-weighted, MUT-mean-mahalanobis | planned |
-| Attention-pooled and graph-pooled variants | planned |
-| **Datasets** | |
-| S1–S5 (homologous series: alkanes, alkanols, acids, amines, PEGs) | done |
-| S6 monosubstituted benzenes (11 after element filter) | done |
-| S7 monosubstituted cyclohexanes (10) | done |
-| S8 para-substituted benzoic acids — Hammett series (9 after element filter) | done |
-| D3 WelQrate (9 PubChem AIDs: AID1798, AID1843, AID2258, AID2689, AID435008, AID435034, AID463087, AID485290, AID488997) with downloader, scaffold splits, blacklist-aware build | done |
-| D4 MUV (17 PubChem AIDs from the RDKit benchmarking_platform: 466, 548, 600, 644, 652, 689, 692, 712, 713, 733, 737, 810, 832, 846, 852, 858, 859) | done |
-| D5 DUD-E | **deferred** (see PROJECT_PLAN.md §5.5) |
-| D6 MMP-cliffs, D7–D8 bioisosteres, D9 Riniker-Landrum | pending |
-| **Experiments** | |
-| EXP-1 Homologous series smoothness (M-MONO, M-SMOOTH, M-LIN) | done |
-| EXP-2 Functional group substitution sensitivity (M-HAMMETT-PAIR, M-SILHOUETTE) | done |
-| EXP-3a WelQrate retrieval (M-LOGAUC, M-BEDROC20, M-EF1, M-DCG100) | implemented; analysis methods awaiting validation |
-| EXP-3b MUV retrieval (M-AUCROC, M-BEDROC20, M-EF1; 5 deterministically-seeded random query draws per target) | implemented; first end-to-end run in progress |
-| EXP-3c DUD-E retrieval | **deferred** (see PROJECT_PLAN.md §5.5; revisit at implementation time, discuss at writing time) |
-| EXP-4 Activity cliff sensitivity | pending |
-| EXP-5 Bioisostere recognition (critical hypothesis test) | pending |
-| EXP-6 Scaffold hopping | pending |
+Authoritative, always-fresh per-method numbers live in [results/SUMMARY.md](results/SUMMARY.md), regenerated on every `python -m eddde` run. Group-level summary:
+
+- **Framework** — done (runner, caching, manifest chain, SUMMARY writer, optional-binary soft-skip).
+- **Baselines** — B1–B11 and B18 implemented. B12 (Mol2vec), B13 (Uni-Mol), B14 (Chemprop), B15–B17 (Coulomb matrix, SOAP, ACSF) pending.
+- **MUTs** — Five-strain taxonomy spec'd in [PROJECT_PLAN.md §3.2](PROJECT_PLAN.md). Strain A: `MUT-mean` implemented (refactor to 39-d scalarised pending); other Strain A variants and Strains B/C/D/E all planned.
+- **Datasets** — Internal series S1–S8 done. D3 WelQrate (9 PubChem AIDs) and D4 MUV (17 AIDs) done. D5 DUD-E deferred (see PROJECT_PLAN.md §5.5). D6 cliffs, D7–D8 bioisosteres, D9 Riniker-Landrum pending.
+- **Experiments** — EXP-1, EXP-2 done. EXP-3a, EXP-3b implemented; first end-to-end runs in progress. EXP-3c deferred (see PROJECT_PLAN.md §5.5). EXP-4 cliffs, EXP-5 bioisosteres, EXP-6 scaffold hopping pending.

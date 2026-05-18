@@ -18,6 +18,7 @@ class MutMean(Method):
     id = "MUT-mean"
     version = "mean-euclidean-v1"
     needs = Stage.ELEKTRONN_COEFFS
+    is_mut = True
 
     def embed_dataset(self, stage_data: dict) -> dict[str, Any]:
         coefficients: dict[str, np.ndarray] = stage_data[Stage.ELEKTRONN_COEFFS]["coefficients"]

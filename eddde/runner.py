@@ -151,7 +151,14 @@ def _write_summary_md(method_ids: list[str]) -> None:
             lines.append(f"## {exp_id}\n\n_No report implemented for this experiment._\n")
             continue
 
-        df = exp.collect_results(method_ids)
+        # Restrict the per-experiment table to methods this experiment runs
+        # on. Without this an EXP-EQUIVAR-style filtered experiment shows a
+        # long block of "—" rows for every baseline that the runner never
+        # embedded on its dataset.
+        exp_method_filter = getattr(exp, "method_filter", lambda m: True)
+        exp_method_ids = [m for m in method_ids if exp_method_filter(METHODS[m])]
+
+        df = exp.collect_results(exp_method_ids)
         if df.empty:
             lines.append(f"## {exp_id}\n\n_No results available yet._\n")
             continue
@@ -163,8 +170,8 @@ def _write_summary_md(method_ids: list[str]) -> None:
         metric_datasets = getattr(exp, "metric_datasets", None) or {m: exp.datasets for m in metrics}
 
         # --- Per-metric stats: mean ± SE and coverage ---
-        stat_rows: dict[str, dict[str, str]] = {m: {} for m in method_ids}
-        rank_rows: dict[str, dict[str, float]] = {m: {} for m in method_ids}
+        stat_rows: dict[str, dict[str, str]] = {m: {} for m in exp_method_ids}
+        rank_rows: dict[str, dict[str, float]] = {m: {} for m in exp_method_ids}
 
         for metric in metrics:
             direction = exp.metric_direction[metric]
@@ -172,14 +179,14 @@ def _write_summary_md(method_ids: list[str]) -> None:
             sub = df[df["metric"] == metric]
 
             method_vals: dict[str, list[float]] = {}
-            for m_id in method_ids:
+            for m_id in exp_method_ids:
                 vals = sub[sub["method"] == m_id]["value"].dropna().tolist()
                 method_vals[m_id] = vals
 
             # Mean ± SE with coverage. If the metric only applies to one dataset,
             # skip the (n/n) annotation entirely — it's always "(1/1)" by design
             # and adds no information.
-            for m_id in method_ids:
+            for m_id in exp_method_ids:
                 vals = method_vals[m_id]
                 n = len(vals)
                 if n_applicable <= 1:
@@ -198,7 +205,7 @@ def _write_summary_md(method_ids: list[str]) -> None:
 
             # Rank (lower rank = better). Null → worst rank = n_methods + 1
             mean_vals: list[tuple[str, float | None]] = []
-            for m_id in method_ids:
+            for m_id in exp_method_ids:
                 vals = method_vals[m_id]
                 mean_vals.append((m_id, float(np.mean(vals)) if vals else None))
 
@@ -210,26 +217,26 @@ def _write_summary_md(method_ids: list[str]) -> None:
             for rank_idx, (m_id, _) in enumerate(nonnull, start=1):
                 rank_rows[m_id][metric] = float(rank_idx)
             for m_id in null_methods:
-                rank_rows[m_id][metric] = float(len(method_ids) + 1)
+                rank_rows[m_id][metric] = float(len(exp_method_ids) + 1)
 
         # Accumulate average ranks
-        for m_id in method_ids:
+        for m_id in exp_method_ids:
             ranks = list(rank_rows[m_id].values())
             if ranks:
                 all_avg_ranks[m_id].append(float(np.mean(ranks)))
 
         # Average rank per method within this experiment
         exp_avg_rank: dict[str, float] = {}
-        for m_id in method_ids:
+        for m_id in exp_method_ids:
             ranks = list(rank_rows[m_id].values())
             exp_avg_rank[m_id] = float(np.mean(ranks)) if ranks else float("nan")
 
-        sorted_methods = sorted(method_ids, key=lambda m: exp_avg_rank.get(m, float("nan")))
+        sorted_methods = sorted(exp_method_ids, key=lambda m: exp_avg_rank.get(m, float("nan")))
 
         # --- Per-method end-to-end time per molecule + per-pair distance time ---
-        time_per_mol: dict[str, list[float]] = {m: [] for m in method_ids}
-        time_per_pair: dict[str, list[float]] = {m: [] for m in method_ids}
-        for m_id in method_ids:
+        time_per_mol: dict[str, list[float]] = {m: [] for m in exp_method_ids}
+        time_per_pair: dict[str, list[float]] = {m: [] for m in exp_method_ids}
+        for m_id in exp_method_ids:
             for ds_id in exp.datasets:
                 marker = result_dir(exp_id, m_id, ds_id) / "metrics.json"
                 em = Manifest.load(manifest_path(marker))
@@ -243,6 +250,10 @@ def _write_summary_md(method_ids: list[str]) -> None:
 
         # Build markdown table
         lines.append(f"\n## {exp_id}\n")
+        if hasattr(exp, "preamble"):
+            pre = exp.preamble(exp_method_ids)
+            if pre:
+                lines.append(pre)
         header_cols = ["Method"] + [f"{m}" for m in metrics] + ["Avg rank", "s/mol", "s/pair"]
         lines.append("| " + " | ".join(header_cols) + " |")
         lines.append("| " + " | ".join(["---"] * len(header_cols)) + " |")
@@ -297,12 +308,15 @@ def main() -> None:
 
     print("\n=== Experiments ===")
     for exp_id, exp in EXPERIMENTS.items():
+        method_filter = getattr(exp, "method_filter", lambda m: True)
         for ds_id in exp.datasets:
             if ds_id not in DATASETS:
                 print(f"[{exp_id}] dataset {ds_id} not registered, skipping")
                 continue
             stage_data = _load_stage_data(ds_id, max_stage)
             for m_id, method in METHODS.items():
+                if not method_filter(method):
+                    continue
                 _embed_if_stale(method, ds_id, stage_data)
                 _run_experiment_if_stale(exp, method, ds_id, stage_data)
         if hasattr(exp, "make_plots"):

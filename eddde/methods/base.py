@@ -49,6 +49,11 @@ class Method(ABC):
     version: str
     needs: Stage
 
+    # Set True on Methods Under Test. EXP-EQUIVAR's `method_filter` uses it
+    # to restrict S0 (audit fixture) embedding + experiment runs to MUTs.
+    # Baselines leave the default; no other code reads the flag.
+    is_mut: bool = False
+
     # Set by the runner from the embedding-stage benchmark before any
     # experiment runs. `pairwise_matrix` reads it to predict serial cost
     # and parallelise only when the predicted time exceeds pool overhead.

@@ -6,6 +6,7 @@ from .exp1_homologous import Exp1Homologous
 from .exp2_functional_group import Exp2FunctionalGroup
 from .exp3a_welqrate import Exp3aWelQrate
 from .exp3b_muv import Exp3bMUV
+from .equivariance import ExpEquivariance
 
 
 EXPERIMENTS: dict[str, Experiment] = {}
@@ -17,6 +18,7 @@ def _register(e: Experiment) -> None:
     EXPERIMENTS[e.id] = e
 
 
+_register(ExpEquivariance())
 _register(Exp1Homologous())
 _register(Exp2FunctionalGroup())
 _register(Exp3aWelQrate())

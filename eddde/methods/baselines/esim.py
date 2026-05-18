@@ -49,14 +49,28 @@ from ..base import Method
 
 
 def _espsim_combo(prb_aligned: Chem.Mol, ref: Chem.Mol) -> float:
-    """Shape + ESP combo on a pre-aligned pair; returns similarity in [0, 1]."""
+    """Shape + ESP combo on a pre-aligned pair; returns similarity in [0, 1].
+
+    When one or both molecules have an all-zero ESP (typical for pure
+    hydrocarbons where every MMFF partial charge is ~0), the Carbo
+    denominator ``√(intAA · intBB)`` is zero and espsim raises
+    ``ValueError("Denominator in similarity calculation equals zero.")``.
+    There is genuinely no ESP signal to compare in that case, so we
+    degrade gracefully to shape-only similarity (i.e. ESP contributes
+    nothing). This affects whole datasets of non-polar molecules
+    (S1 alkanes) uniformly across all pairs, so the comparison stays
+    fair.
+    """
     shape_sim = GetShapeSim(prb_aligned, ref)
-    esp_sim = GetEspSim(
-        prb_aligned, ref,
-        partialCharges="mmff",
-        metric="carbo",
-        renormalize=True,
-    )
+    try:
+        esp_sim = GetEspSim(
+            prb_aligned, ref,
+            partialCharges="mmff",
+            metric="carbo",
+            renormalize=True,
+        )
+    except ValueError:
+        return shape_sim
     return 0.5 * (shape_sim + esp_sim)
 
 
@@ -69,7 +83,7 @@ class ESimShape(Method):
     """B11-shape: shape-driven pose search (rdShapeAlign) + espsim combo."""
 
     id = "B11-shape"
-    version = "espsim-shape-mmff-v1"
+    version = "espsim-shape-mmff-v2"
     needs = Stage.CONFORMERS
 
     embed_dataset = staticmethod(_embed_conformer_copies)
@@ -93,7 +107,7 @@ class ESimO3A(Method):
     """
 
     id = "B11-o3a"
-    version = "espsim-o3a-mmff-v1"
+    version = "espsim-o3a-mmff-v2"
     needs = Stage.CONFORMERS
 
     embed_dataset = staticmethod(_embed_conformer_copies)

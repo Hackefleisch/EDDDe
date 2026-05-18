@@ -30,6 +30,7 @@ All fingerprint-based baselines use Tanimoto similarity unless stated otherwise.
 | Method | Description | Tool / Reference |
 |--------|-------------|------------------|
 | **RDKit 2D descriptors (200 descriptors) + Euclidean/cosine distance** | Molecular weight, logP, TPSA, ring counts, hydrogen bond donors/acceptors, etc. Represents classical QSAR descriptors. | RDKit `Descriptors` module. |
+| **BCL Mol2d descriptors** (B18) | The Meiler lab's 2D descriptor suite — scalar physicochemical properties, 2D autocorrelations (Moreau-Broto / Moran / Geary style), and topological signatures aggregated into a fixed-size vector. Sibling to the RDKit 2D set above but built on a different descriptor philosophy, so it adds a genuine second 2D-descriptor data point rather than duplicating B7. Distance via cosine or Euclidean (decide at implementation time, by analogy to B7). | **TODO cite**: original BCL Mol2d paper + the in-submission Spinnaker paper (placeholders — fill in when implementing). Included partly to acknowledge the collaborator's work alongside the scientific contribution. |
 
 ### 2.3 3D Shape and Field Similarity
 

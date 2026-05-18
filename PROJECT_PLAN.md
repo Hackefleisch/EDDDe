@@ -60,8 +60,9 @@ All baselines must be computed on the same molecule sets as MUT. When applicable
 | B15 | Coulomb Matrix | QM-inspired | matrix / Frobenius or kernel | Rupp et al. 2012 |
 | B16 | SOAP | QM-inspired | vector / kernel | Bartók et al. 2013 (use DScribe lib) |
 | B17 | ACSF (Behler-Parrinello) | QM-inspired | vector / Euclidean | Behler 2011 (use DScribe lib) |
+| B18 | BCL Mol2d descriptors | Physicochemical / 2D | vector / cosine, Euclidean | **TODO cite**: original BCL Mol2d paper + in-submission Spinnaker paper (user will recognise both — leave as placeholder until implementation lands) |
 
-**Baseline groupings for analysis:** Topological (B1–B6), Physicochemical (B7), 3D-structural (B8–B11), Learned (B12–B14), QM-descriptor (B15–B17).
+**Baseline groupings for analysis:** Topological (B1–B6), Physicochemical (B7, B18), 3D-structural (B8–B11), Learned (B12–B14), QM-descriptor (B15–B17).
 
 **Rationale for QM-descriptor baselines:** Critical for isolating whether any MUT advantage stems from electron density specifically, vs. QM information in general.
 

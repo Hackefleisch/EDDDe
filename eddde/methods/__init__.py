@@ -13,7 +13,7 @@ from .baselines.usr import USR
 from .baselines.usrcat import USRCAT
 from .baselines.esim import ESimShape, ESimO3A
 from .baselines.bcl_mol2d import BCLMol2D
-from .muts.mean import MutMean, MutMeanCosine
+from .muts.mean import MutMean, MutMeanCosine, MutMeanMax
 
 
 METHODS: dict[str, Method] = {}
@@ -46,3 +46,4 @@ else:
     )
 _register(MutMean())
 _register(MutMeanCosine())
+_register(MutMeanMax())

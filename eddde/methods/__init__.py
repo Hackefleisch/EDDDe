@@ -1,6 +1,7 @@
 """Method registry. Import a method module and call `_register` to add it."""
 from __future__ import annotations
 
+from .. import BCL_BIN
 from .base import Method
 from .baselines.ecfp import ECFP4, ECFP6, FCFP4
 from .baselines.maccs import MACCSKeys
@@ -11,6 +12,7 @@ from .baselines.shape_align import GaussianShapeAlign
 from .baselines.usr import USR
 from .baselines.usrcat import USRCAT
 from .baselines.esim import ESimShape, ESimO3A
+from .baselines.bcl_mol2d import BCLMol2D
 from .muts.mean import MutMean
 
 
@@ -35,4 +37,11 @@ _register(USR())
 _register(USRCAT())
 _register(ESimShape())
 _register(ESimO3A())
+if BCL_BIN:
+    _register(BCLMol2D())
+else:
+    print(
+        "[methods] B18 (BCL::Mol2D) skipped: BCL_BIN not set in "
+        "eddde/local_settings.py. See CLAUDE.md §Environment to enable."
+    )
 _register(MutMean())

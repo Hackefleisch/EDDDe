@@ -27,6 +27,8 @@ The runner materializes dataset stages (SMILES → conformers → ElektroNN coef
 
 ```
 eddde/
+  __init__.py                # project constants (SEED, N_WORKERS, BCL_BIN), local_settings resolver
+  local_settings.example.py  # template for eddde/local_settings.py (gitignored, per-machine config)
   cache.py                   # manifest-based staleness checks
   runner.py                  # main() — stages → embeddings → experiments → SUMMARY.md
   data/
@@ -38,7 +40,7 @@ eddde/
   methods/
     base.py                  # Method ABC, embedding cache, distance benchmark
     distance.py              # pairwise_matrix(): serial / multiprocessing / batched-override dispatch
-    baselines/               # one file per baseline (B1–B7 + B9 USR implemented)
+    baselines/               # one file per baseline (B1–B11, B18 implemented; B12–B17 pending)
     muts/                    # one file per MUT condensing scheme (MUT-mean implemented)
   experiments/               # one file per experiment (EXP-1, EXP-2, EXP-3a, EXP-3b implemented; retrieval_common.py shared)
 ```
@@ -59,6 +61,30 @@ cd EDDDe
 uv venv && source .venv/bin/activate
 uv pip install -e .
 ```
+
+### Per-machine config: `eddde/local_settings.py`
+
+Anything machine-specific (today: the path to optional external binaries) lives in `eddde/local_settings.py`, which is gitignored. Copy the template once after install:
+
+```bash
+cp eddde/local_settings.example.py eddde/local_settings.py
+```
+
+then edit only the lines you need. **Everything in this file is optional**: when a value is `None` or absent, the dependent method silently does not register — every other method runs unaffected, no errors, no empty result columns.
+
+### Optional: BCL toolkit for B18 (BCL::Mol2D)
+
+B18 calls the closed-source [BCL](https://github.com/BCLCommons/bcl) C++ binary. The license forbids redistribution, so it can't ship via uv or be vendored in the repo. To enable B18:
+
+1. Download the prebuilt installer from [BCLCommons/bcl releases](https://github.com/BCLCommons/bcl/releases) (`bcl-4.3.1-Linux-x86_64.sh` at the time of writing), make it executable, and run it once. It self-extracts to a directory containing `bcl.exe`.
+2. In `eddde/local_settings.py`, set:
+   ```python
+   BCL_BIN = "/abs/path/to/bcl-4.3.1-Linux-x86_64/bcl.exe"
+   ```
+
+Skip this step entirely if you don't need B18. The startup will print one line — `[methods] B18 (BCL::Mol2D) skipped: BCL_BIN not set...` — and proceed without it.
+
+The same `_setting(attr_name)` helper in [eddde/__init__.py](eddde/__init__.py) is the reusable hook for any future optional external dep.
 
 ## Running
 
@@ -99,7 +125,9 @@ Builds the SMILES stage if needed (cached) and saves a PNG grid to `figures/<dat
 
 ## Current results
 
-Results below are from running EXP-1, EXP-2, EXP-3a, and EXP-3b against B1–B7, B9, and MUT-mean. EXP-3a's analysis pass is still being validated, so the WelQrate numbers should be treated as provisional. All results are fully reproducible: `python -m eddde` regenerates them from scratch.
+> ⚠️ **The numbered tables below are an older snapshot kept here for shape-of-the-data illustration. The authoritative, always-fresh numbers live in [`results/SUMMARY.md`](results/SUMMARY.md), regenerated on every `python -m eddde` run.** Recent additions (B10 USRCAT, B11-shape, B11-o3a, B18 BCL::Mol2D) and the EXP-2/EXP-3 re-runs that followed the B11-o3a alignment-engine switch from MMFF-O3A to Crippen-O3A are reflected there but not yet here.
+
+Results below are from an earlier run with B1–B7, B9, and MUT-mean. All results are fully reproducible: `python -m eddde` regenerates everything from scratch.
 
 ### EXP-1 — Homologous Series Smoothness (S1–S5)
 
@@ -168,6 +196,24 @@ None of the headline numbers are out of the ordinary for MUV. Pre-MUT-era report
 
 ---
 
+## Recent progress
+
+Latest additions, most recent first. See [`results/SUMMARY.md`](results/SUMMARY.md) for the current numbers any of these produce.
+
+**Baselines**
+- **B10 USRCAT** — RDKit's 60-d pharmacophoric extension of B9 USR; inverse-Manhattan distance.
+- **B11 eSim** (two variants) — open-source equivalent of Jain's proprietary eSim via the [`espsim`](https://github.com/hesther/espsim) package, combining shape and electrostatic-potential similarity with MMFF charges on aligned poses.
+  - **B11-shape** uses `rdShapeAlign.AlignMol` (Gaussian-shape pose search, same engine as B8).
+  - **B11-o3a** uses `rdMolAlign.GetCrippenO3A` (atom-correspondence alignment). We benchmarked MMFF-O3A and Crippen-O3A and switched to Crippen as primary: ~1.8× faster on drug-like libraries with identical alignments on substituent-conserved series, *and* widens the EXP-2 S6−S7 silhouette specificity gap from −0.079 (anti-specific) to +0.206 (properly specific).
+  - Hydrocarbons trigger an `espsim` ValueError when the Carbo denominator vanishes; we degrade gracefully to shape-only similarity for those pairs (preserves `d(x,x)=0`; revisit if it fires on polar↔non-polar pairs in future drug-like datasets).
+- **B18 BCL::Mol2D** — 574-d atom-environment count vector from BCL's `UMol2D` descriptor (published defaults: atom-type encoding, height=1). Cosine distance. Closed-source binary, soft-skipped if not configured — see Installation.
+
+**Framework**
+- **Per-machine config via `eddde/local_settings.py`** (gitignored, template in `local_settings.example.py`). Optional external deps register conditionally; missing config skips the dependent method silently instead of erroring or producing empty result columns.
+- **EXP-3a/3b plot acceleration via curve-summary cache**. The TPR-vs-log-FPR aggregation now persists as a per-(method, dataset) `enrichment_curve.npz` alongside `retrieval_rankings.csv`. Adding a new method only re-aggregates that method's CSV instead of re-reading all of them, which previously dominated plot generation on large retrieval datasets. The cumulative-recall and rank-distribution figures were dropped (information already conveyed by enrichment curves + heatmaps + raw CSVs).
+
+---
+
 ## Status
 
 | Component | Status |
@@ -179,7 +225,11 @@ None of the headline numbers are out of the ordinary for MUV. Pre-MUT-era report
 | B7 RDKit 2048-bit 2D descriptors (cosine distance) | done |
 | B8 Gaussian shape + color Tanimoto (RDKit `rdShapeAlign`, ROCS-equivalent) | done |
 | B9 USR (12-d, RDKit, inverse-Manhattan distance) | done |
-| B10 USRCAT, B11 eSim, B12 Mol2vec, B13 Uni-Mol, B14 Chemprop | pending |
+| B10 USRCAT (60-d, RDKit, inverse-Manhattan distance) | done |
+| B11-shape eSim with shape-driven alignment (`rdShapeAlign.AlignMol` + `espsim`) | done |
+| B11-o3a eSim with atom-correspondence alignment (`rdMolAlign.GetCrippenO3A` + `espsim`) | done |
+| B18 BCL::Mol2D atom-environment descriptor (574-d count vector, cosine; **requires BCL binary**, see Installation) | done (optional — soft-skip when `BCL_BIN` unset) |
+| B12 Mol2vec, B13 Uni-Mol, B14 Chemprop | pending |
 | B15–B17 (QM-descriptor baselines: Coulomb matrix, SOAP, ACSF) | pending |
 | **MUTs** | |
 | MUT-mean (atom-mean → 127-d vector, Euclidean distance) | done |

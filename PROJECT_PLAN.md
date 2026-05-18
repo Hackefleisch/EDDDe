@@ -60,7 +60,7 @@ All baselines must be computed on the same molecule sets as MUT. When applicable
 | B15 | Coulomb Matrix | QM-inspired | matrix / Frobenius or kernel | Rupp et al. 2012 |
 | B16 | SOAP | QM-inspired | vector / kernel | Bartók et al. 2013 (use DScribe lib) |
 | B17 | ACSF (Behler-Parrinello) | QM-inspired | vector / Euclidean | Behler 2011 (use DScribe lib) |
-| B18 | BCL Mol2d descriptors | Physicochemical / 2D | vector / cosine, Euclidean | **TODO cite**: original BCL Mol2d paper + in-submission Spinnaker paper (user will recognise both — leave as placeholder until implementation lands) |
+| B18 | BCL::Mol2D atom-environment descriptor (574-d count vector, atom-type encoding, height=1 — published defaults of BCL's `UMol2D` invocation) | Physicochemical / 2D | vector / cosine | [Vu et al. JCAMD 2019](https://doi.org/10.1007/s10822-019-00199-8). Implementation invokes BCL's `bcl.exe molecule:Properties -tabulate UMol2D` per dataset via subprocess (one batched call, no per-mol overhead). BCL is a closed-source C++ binary whose [license](https://github.com/BCLCommons/bcl/blob/master/LICENSE) forbids redistribution — the path is read from `BCL_BIN` in `eddde/local_settings.py` (gitignored; copy from [`local_settings.example.py`](eddde/local_settings.example.py)). When unset, B18 silently does not register; every other method is unaffected. See [CLAUDE.md](CLAUDE.md) §Environment for the install + config sequence. **TODO cite (Spinnaker)**: in-preparation paper, leave as placeholder until publication. |
 
 **Baseline groupings for analysis:** Topological (B1–B6), Physicochemical (B7, B18), 3D-structural (B8–B11), Learned (B12–B14), QM-descriptor (B15–B17).
 

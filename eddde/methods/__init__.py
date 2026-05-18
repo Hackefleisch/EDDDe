@@ -9,6 +9,7 @@ from .baselines.topological_torsion import TopologicalTorsion
 from .baselines.rdkit_descriptors import RDKitDescriptors
 from .baselines.shape_align import GaussianShapeAlign
 from .baselines.usr import USR
+from .baselines.usrcat import USRCAT
 from .muts.mean import MutMean
 
 
@@ -30,4 +31,5 @@ _register(TopologicalTorsion())
 _register(RDKitDescriptors())
 _register(GaussianShapeAlign())
 _register(USR())
+_register(USRCAT())
 _register(MutMean())

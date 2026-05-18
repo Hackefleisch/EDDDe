@@ -145,6 +145,7 @@ class Exp3bMUV:
 
         pd.DataFrame(retrieval_rows, columns=list(rc.RETRIEVAL_COLS)).to_csv(
             out / "retrieval_rankings.csv", index=False)
+        rc.write_enrichment_summary(out, out / "retrieval_rankings.csv")
 
         metrics: dict = {}
         metrics.update(rc.metric_entry("M-AUCROC",   seed_aucroc))
@@ -193,9 +194,9 @@ class Exp3bMUV:
             return
 
         print(f"  [{self.id}] generating plots...")
+        for stale_name in ("cumulative_recall.png", "rank_distributions.png"):
+            (plots_dir / stale_name).unlink(missing_ok=True)
         rc.plot_enrichment_curves(self.id, plots_dir, method_ids, self.datasets)
         rc.plot_metric_heatmap(self.id, plots_dir, method_ids, self.datasets,
                                metrics=list(self.metric_direction.keys()))
-        rc.plot_cumulative_recall(self.id, plots_dir, method_ids, self.datasets)
-        rc.plot_rank_distributions(self.id, plots_dir, method_ids, self.datasets)
         write_manifest(sentinel, version=self.version, inputs=input_hashes, compute_time=0.0, dataset_size=0)

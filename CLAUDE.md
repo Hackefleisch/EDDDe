@@ -30,7 +30,16 @@ uv pip install -e .
 python -m eddde   # run the pipeline
 ```
 
-Current dependencies ([pyproject.toml](pyproject.toml)): `numpy`, `scipy`, `pandas`, `rdkit`, `matplotlib`, `tqdm`, `ipykernel`, `elektronn`. Additional deps (e.g. `scikit-learn`, `pot`, `dscribe`, `mmpdb`) will be added as specific experiments are implemented — add them to `pyproject.toml`, don't silently assume they are present.
+Current dependencies ([pyproject.toml](pyproject.toml)): `numpy`, `scipy`, `pandas`, `rdkit`, `matplotlib`, `tqdm`, `ipykernel`, `elektronn`, `espsim`. Additional deps (e.g. `scikit-learn`, `pot`, `dscribe`, `mmpdb`) will be added as specific experiments are implemented — add them to `pyproject.toml`, don't silently assume they are present.
+
+**Optional external binary (B18 only):** B18 (BCL::Mol2D) shells out to the closed-source BCL binary (`bcl.exe`). The license forbids redistribution, so it can't be vendored or uv-installed. To enable B18:
+
+1. Download the prebuilt Linux installer from [BCLCommons/bcl releases](https://github.com/BCLCommons/bcl/releases) (currently `bcl-4.3.1-Linux-x86_64.sh`) and run it once.
+2. Copy [eddde/local_settings.example.py](eddde/local_settings.example.py) to `eddde/local_settings.py` (gitignored) and set `BCL_BIN = "/abs/path/to/bcl.exe"`.
+
+**When unset, B18 simply does not register** — a one-line `[methods] B18 ... skipped` message prints at startup; every other method runs unaffected, no empty results columns. The clear error path still fires if `BCL_BIN` IS set but the file doesn't exist (opted in but broken install).
+
+The `_setting(attr_name)` helper in [eddde/__init__.py](eddde/__init__.py) is the right hook for any future optional external dep — define a constant there, add it to `local_settings.example.py`, and conditionally register in [eddde/methods/__init__.py](eddde/methods/__init__.py).
 
 **Project-wide constants** live at the package root in [eddde/__init__.py](eddde/__init__.py):
 - `SEED = 0xEDDDE` — used by every component that needs deterministic randomness (conformer embedding, test-mode downsampling, etc.) so reruns are reproducible and content-hashes stay stable.
@@ -129,7 +138,8 @@ Implement the `Experiment` protocol in `eddde/experiments/`. Declare `datasets: 
 **Retrieval experiments** (EXP-3a/3b, and EXP-3c if/when implemented) share metric definitions, the raw-CSV schema, and most plots via [eddde/experiments/retrieval_common.py](eddde/experiments/retrieval_common.py). Use it for any new retrieval-style experiment to keep metrics consistent across them:
 - Math helpers: `logauc`, `bedroc`, `ef_at_percent`, `dcg_at_k`, `nanmean`, `mean_se`.
 - IO helpers: `RETRIEVAL_COLS` (canonical raw-CSV schema), `read_csv_or_empty`, `metric_entry`, `metrics_to_json`.
-- Plot helpers: `plot_enrichment_curves`, `plot_metric_heatmap`, `plot_cumulative_recall`, `plot_rank_distributions` — each takes `(exp_id, plots_dir, method_ids, datasets)` and auto-shapes the subplot grid from `len(datasets)`, so the same code handles 9-target (WelQrate) and 17-target (MUV) layouts.
+- Plot helpers: `plot_enrichment_curves`, `plot_metric_heatmap` — each takes `(exp_id, plots_dir, method_ids, datasets)` and auto-shapes the subplot grid from `len(datasets)`, so the same code handles 9-target (WelQrate) and 17-target (MUV) layouts. `plot_enrichment_curves` reads a per-(method, dataset) `enrichment_curve.npz` cache (built by `write_enrichment_summary` during `run()`) so re-plotting after adding a new method only re-aggregates the new method's CSV.
+- Curve cache: `write_enrichment_summary(out_dir, retrieval_csv)` — call from each retrieval experiment's `run()` immediately after writing `retrieval_rankings.csv`. Persists the 200-point TPR-vs-log-FPR average as `enrichment_curve.npz` next to the CSV. `plot_enrichment_curves` auto-regenerates a missing/stale npz from the CSV (mtime-based), so older cached runs self-heal on first plot.
 
 Experiments compose these in their own `run()` and `make_plots()` rather than inheriting from a shared base class — the differences across retrieval experiments are at the *query/pool definition* level (scaffold seeds vs. random query draws vs. one-active-per-target), which hooks cleanly into the call site without an abstraction layer.
 

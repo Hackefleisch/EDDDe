@@ -13,7 +13,7 @@ from .baselines.usr import USR
 from .baselines.usrcat import USRCAT
 from .baselines.esim import ESimShape, ESimO3A
 from .baselines.bcl_mol2d import BCLMol2D
-from .muts.mean import MutMean
+from .muts.mean import MutMean, MutMeanCosine
 
 
 METHODS: dict[str, Method] = {}
@@ -45,3 +45,4 @@ else:
         "eddde/local_settings.py. See CLAUDE.md §Environment to enable."
     )
 _register(MutMean())
+_register(MutMeanCosine())

@@ -169,16 +169,96 @@ def _per_dataset_grid(n_datasets: int, cell_size: tuple[float, float] = (5.0, 4.
     return fig, axes_flat
 
 
+# Shared log-FPR grid for enrichment-curve summaries. Cached npz files are
+# keyed by this grid, so changing it invalidates every cached summary —
+# rebuild by deleting the npz files (or just letting them be regenerated
+# from the source CSV by `_load_or_build_curve`).
+LOG_FPR_GRID = np.linspace(-3, 0, 200)
+ENRICHMENT_CURVE_NPZ = "enrichment_curve.npz"
+
+
+def _build_curve_arrays(df: pd.DataFrame) -> tuple[np.ndarray, int]:
+    """Aggregate the per-(seed, query) interp into the shared LOG_FPR_GRID.
+
+    Returns (tpr_avg, n_curves). When n_curves == 0 the TPR array is zeros
+    and callers should treat the summary as empty.
+    """
+    tpr_grid = np.zeros(LOG_FPR_GRID.size)
+    n_curves = 0
+    fprs = 10 ** LOG_FPR_GRID
+    for (_seed, _q), grp in df.groupby(["seed", "query_id"]):
+        n_total = grp["n_total"].iloc[0]
+        n_actives = grp["n_actives_in_pool"].iloc[0]
+        ni = n_total - n_actives
+        if ni <= 0 or n_actives == 0:
+            continue
+        ranks = np.sort(grp["rank"].values.astype(float))
+        tp = np.arange(1, len(ranks) + 1, dtype=float)
+        fpr_pts = np.concatenate([[0.0], (ranks - tp) / ni, [1.0]])
+        tpr_pts = np.concatenate([[0.0], tp / n_actives, [1.0]])
+        tpr_grid += np.interp(fprs, fpr_pts, tpr_pts)
+        n_curves += 1
+    if n_curves > 0:
+        tpr_grid /= n_curves
+    return tpr_grid, n_curves
+
+
+def write_enrichment_summary(out_dir: Path, retrieval_csv: Path) -> None:
+    """Persist the 200-point TPR curve next to `retrieval_csv` as npz.
+
+    Call from each experiment's `run()` immediately after writing the
+    retrieval CSV. Plotting then loads tiny npz files instead of
+    re-grouping millions of CSV rows. An empty CSV writes no npz —
+    `_load_or_build_curve` treats absence as "skip this method".
+    """
+    df = read_csv_or_empty(retrieval_csv)
+    if df.empty:
+        return
+    tpr, n_curves = _build_curve_arrays(df)
+    if n_curves == 0:
+        return
+    np.savez(
+        out_dir / ENRICHMENT_CURVE_NPZ,
+        log_fprs=LOG_FPR_GRID,
+        tpr=tpr,
+        n_curves=np.int64(n_curves),
+    )
+
+
+def _load_or_build_curve(method_dir: Path) -> np.ndarray | None:
+    """Return the cached TPR array, building it from the CSV if missing.
+
+    The npz is considered fresh when it exists and is at least as new as
+    the source CSV. Stale npz files are rebuilt in place so older runs
+    (from before this cache existed) self-heal on first plot.
+    """
+    csv_path = method_dir / "retrieval_rankings.csv"
+    npz_path = method_dir / ENRICHMENT_CURVE_NPZ
+    if not csv_path.exists():
+        return None
+    if npz_path.exists() and npz_path.stat().st_mtime >= csv_path.stat().st_mtime:
+        with np.load(npz_path) as data:
+            return data["tpr"].copy()
+    write_enrichment_summary(method_dir, csv_path)
+    if npz_path.exists():
+        with np.load(npz_path) as data:
+            return data["tpr"].copy()
+    return None
+
+
 def plot_enrichment_curves(
     exp_id: str,
     plots_dir: Path,
     method_ids: list[str],
     datasets: list[str],
-    retrieval_csv: str = "retrieval_rankings.csv",
 ) -> None:
-    """Log-scale ROC per dataset, one line per method (avg over seeds & queries)."""
+    """Log-scale ROC per dataset, one line per method (avg over seeds & queries).
+
+    Reads cached `enrichment_curve.npz` per (method, dataset) — built by
+    `write_enrichment_summary` during `run()`. Falls back to recomputing
+    + caching on the fly for older runs that predate the cache.
+    """
     fig, axes_flat = _per_dataset_grid(len(datasets))
-    log_fprs = np.linspace(-3, 0, 200)
 
     for ax_idx, ds_id in enumerate(datasets):
         ax = axes_flat[ax_idx]
@@ -187,33 +267,14 @@ def plot_enrichment_curves(
         ax.set_ylabel("TPR")
         ax.set_xlim(-3, 0)
         ax.set_ylim(0, 1)
-        ax.plot(log_fprs, 10 ** log_fprs, color="grey", linewidth=0.8,
+        ax.plot(LOG_FPR_GRID, 10 ** LOG_FPR_GRID, color="grey", linewidth=0.8,
                 linestyle="--", label="random")
 
         for m_id in method_ids:
-            p = result_dir(exp_id, m_id, ds_id) / retrieval_csv
-            if not p.exists():
+            tpr = _load_or_build_curve(result_dir(exp_id, m_id, ds_id))
+            if tpr is None:
                 continue
-            df = read_csv_or_empty(p)
-            if df.empty:
-                continue
-            tpr_grid = np.zeros(200)
-            n_curves = 0
-            for (_seed, _q), grp in df.groupby(["seed", "query_id"]):
-                n_total = grp["n_total"].iloc[0]
-                n_actives = grp["n_actives_in_pool"].iloc[0]
-                ni = n_total - n_actives
-                if ni <= 0 or n_actives == 0:
-                    continue
-                ranks = np.sort(grp["rank"].values.astype(float))
-                tp = np.arange(1, len(ranks) + 1, dtype=float)
-                fpr_pts = np.concatenate([[0.0], (ranks - tp) / ni, [1.0]])
-                tpr_pts = np.concatenate([[0.0], tp / n_actives, [1.0]])
-                fprs = 10 ** log_fprs
-                tpr_grid += np.interp(fprs, fpr_pts, tpr_pts)
-                n_curves += 1
-            if n_curves > 0:
-                ax.plot(log_fprs, tpr_grid / n_curves, linewidth=1.2, label=m_id)
+            ax.plot(LOG_FPR_GRID, tpr, linewidth=1.2, label=m_id)
 
         if ax_idx == 0:
             ax.legend(fontsize=7, loc="upper left")
@@ -272,104 +333,3 @@ def plot_metric_heatmap(
         plt.close(fig)
 
 
-def plot_cumulative_recall(
-    exp_id: str,
-    plots_dir: Path,
-    method_ids: list[str],
-    datasets: list[str],
-    retrieval_csv: str = "retrieval_rankings.csv",
-) -> None:
-    """Cumulative recall vs fraction screened, per dataset."""
-    fig, axes_flat = _per_dataset_grid(len(datasets))
-    frac_grid = np.linspace(0, 1, 200)
-
-    for ax_idx, ds_id in enumerate(datasets):
-        ax = axes_flat[ax_idx]
-        ax.set_title(ds_id, fontsize=9)
-        ax.set_xlabel("Fraction of pool screened")
-        ax.set_ylabel("Fraction of actives found")
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.plot([0, 1], [0, 1], color="grey", linewidth=0.8,
-                linestyle="--", label="random")
-
-        for m_id in method_ids:
-            p = result_dir(exp_id, m_id, ds_id) / retrieval_csv
-            if not p.exists():
-                continue
-            df = read_csv_or_empty(p)
-            if df.empty:
-                continue
-            recall_grid = np.zeros(200)
-            n_curves = 0
-            for (_seed, _q), grp in df.groupby(["seed", "query_id"]):
-                n_total = grp["n_total"].iloc[0]
-                n_actives = grp["n_actives_in_pool"].iloc[0]
-                if n_actives == 0:
-                    continue
-                ranks = np.sort(grp["rank"].values.astype(float))
-                frac_pts = np.concatenate([[0.0], ranks / n_total, [1.0]])
-                rec_pts = np.concatenate(
-                    [[0.0], np.arange(1, len(ranks) + 1) / n_actives, [1.0]]
-                )
-                recall_grid += np.interp(frac_grid, frac_pts, rec_pts)
-                n_curves += 1
-            if n_curves > 0:
-                ax.plot(frac_grid, recall_grid / n_curves, linewidth=1.2, label=m_id)
-
-        if ax_idx == 0:
-            ax.legend(fontsize=7, loc="upper left")
-
-    for ax_idx in range(len(datasets), len(axes_flat)):
-        axes_flat[ax_idx].set_visible(False)
-
-    fig.suptitle(f"{exp_id}: Cumulative recall curves (avg over queries & seeds)")
-    fig.tight_layout()
-    fig.savefig(plots_dir / "cumulative_recall.png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
-
-
-def plot_rank_distributions(
-    exp_id: str,
-    plots_dir: Path,
-    method_ids: list[str],
-    datasets: list[str],
-    retrieval_csv: str = "retrieval_rankings.csv",
-) -> None:
-    """Violin plot of normalised active ranks per dataset, one violin per method."""
-    fig, axes_flat = _per_dataset_grid(len(datasets))
-
-    for ax_idx, ds_id in enumerate(datasets):
-        ax = axes_flat[ax_idx]
-        ax.set_title(ds_id, fontsize=9)
-        ax.set_ylabel("Active rank (normalised)")
-        ax.set_xticks(range(len(method_ids)))
-        ax.set_xticklabels(method_ids, rotation=45, ha="right", fontsize=7)
-
-        all_data = []
-        positions = []
-        for i, m_id in enumerate(method_ids):
-            p = result_dir(exp_id, m_id, ds_id) / retrieval_csv
-            if not p.exists():
-                continue
-            df = read_csv_or_empty(p)
-            if df.empty:
-                continue
-            normed = (df["rank"] / df["n_total"]).values
-            if len(normed) > 0:
-                all_data.append(normed)
-                positions.append(i)
-
-        if all_data:
-            parts = ax.violinplot(all_data, positions=positions,
-                                  showmedians=True, widths=0.6)
-            for pc in parts["bodies"]:
-                pc.set_alpha(0.6)
-
-    for ax_idx in range(len(datasets), len(axes_flat)):
-        axes_flat[ax_idx].set_visible(False)
-
-    fig.suptitle(f"{exp_id}: Distribution of normalised active ranks")
-    fig.tight_layout()
-    fig.savefig(plots_dir / "rank_distributions.png", dpi=150, bbox_inches="tight")
-    plt.close(fig)

@@ -46,7 +46,7 @@ import pandas as pd
 from rdkit import Chem, DataStructs
 from rdkit.Chem import rdFingerprintGenerator
 from rdkit.Chem.Scaffolds import MurckoScaffold
-from scipy.stats import ks_2samp, spearmanr
+from scipy.stats import ks_2samp, rankdata, spearmanr
 from sklearn.metrics import roc_auc_score
 
 from ..cache import hash_file, is_stale, write_manifest
@@ -90,6 +90,46 @@ def _scaffold_mol(mol: Chem.Mol) -> Chem.Mol:
         return MurckoScaffold.MakeScaffoldGeneric(mol)
     except Exception:
         return MurckoScaffold.GetScaffoldForMol(mol)
+
+
+def _vectorized_spearman(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Spearman ρ for each row of two (B, n) arrays.
+
+    Re-ranks per row so bootstrap resamples (which break the global rank
+    structure) get the correct Spearman value. Returns a (B,) array.
+    """
+    rx = rankdata(x, axis=1)
+    ry = rankdata(y, axis=1)
+    rxc = rx - rx.mean(axis=1, keepdims=True)
+    ryc = ry - ry.mean(axis=1, keepdims=True)
+    num = (rxc * ryc).sum(axis=1)
+    denom = np.sqrt((rxc ** 2).sum(axis=1) * (ryc ** 2).sum(axis=1))
+    return np.where(denom == 0, np.nan, num / np.where(denom == 0, 1.0, denom))
+
+
+def _bootstrap_delta_rho(
+    d_a: np.ndarray,
+    d_b: np.ndarray,
+    d_pY: np.ndarray,
+    n_bootstrap: int,
+    rng: np.random.Generator,
+    chunk: int = 500,
+) -> np.ndarray:
+    """Paired bootstrap of Δρ = ρ(d_a, |ΔpY|) − ρ(d_b, |ΔpY|).
+
+    For each bootstrap iteration: draw n indices with replacement, compute
+    both Spearman correlations on the *same* resample (paired), return the
+    difference. Chunked over the bootstrap axis to bound peak memory.
+    """
+    n = len(d_pY)
+    out = np.empty(n_bootstrap, dtype=np.float64)
+    for start in range(0, n_bootstrap, chunk):
+        b = min(chunk, n_bootstrap - start)
+        idx = rng.integers(0, n, size=(b, n))
+        rho_a = _vectorized_spearman(d_a[idx], d_pY[idx])
+        rho_b = _vectorized_spearman(d_b[idx], d_pY[idx])
+        out[start : start + b] = rho_a - rho_b
+    return out
 
 
 def _scaled_levenshtein_matrix(smiles: list[str]) -> np.ndarray:
@@ -237,15 +277,28 @@ class Exp4ActivityCliffs:
         if not input_hashes:
             return
 
-        sentinel = plots_dir / "cliff_violin.png"
-        if not is_stale(sentinel, self.version, input_hashes):
+        plots_sentinel = plots_dir / "cliff_violin.png"
+        if is_stale(plots_sentinel, self.version, input_hashes):
+            print(f"  [{self.id}] generating plots...")
+            self._plot_cliff_violin(plots_dir, method_ids)
+            self._plot_dist_vs_dpy(plots_dir, method_ids)
+            write_manifest(plots_sentinel, version=self.version, inputs=input_hashes,
+                           compute_time=0.0, dataset_size=0)
+        else:
             print(f"  [{self.id}] plots fresh")
-            return
 
-        print(f"  [{self.id}] generating plots...")
-        self._plot_cliff_violin(plots_dir, method_ids)
-        self._plot_dist_vs_dpy(plots_dir, method_ids)
-        write_manifest(sentinel, version=self.version, inputs=input_hashes, compute_time=0.0, dataset_size=0)
+        # Bootstrap cross-method significance — tracked with its own sentinel so
+        # adding this analysis to an existing run doesn't require regenerating
+        # the other plots, and a new pairs.csv invalidates it independently.
+        sig_csv = exp_results_dir / "cross_method_significance.csv"
+        if is_stale(sig_csv, self.version, input_hashes):
+            print(f"  [{self.id}] computing cross-method significance...")
+            df_sig = self.cross_method_significance(exp_results_dir, method_ids)
+            self._plot_significance_heatmap(plots_dir, df_sig)
+            write_manifest(sig_csv, version=self.version, inputs=input_hashes,
+                           compute_time=0.0, dataset_size=0)
+        else:
+            print(f"  [{self.id}] cross-method significance fresh")
 
     def _load_pooled(self, method_id: str) -> pd.DataFrame:
         """Concatenate pairs.csv across all targets for one method."""
@@ -258,6 +311,204 @@ class Exp4ActivityCliffs:
                     frame["dataset"] = ds_id
                     frames.append(frame)
         return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+    def cross_method_significance(
+        self,
+        exp_results_dir: Path,
+        method_ids: list[str],
+        n_bootstrap: int = 5000,
+        seed: int = 0xEDDDE,
+    ) -> pd.DataFrame:
+        """Paired-bootstrap test of whether ρ_A > ρ_B for each ordered method pair.
+
+        PROJECT_PLAN.md §5.6 success criterion requires MUT's Spearman ρ to be
+        "significantly higher than all B1–B6 (p < 0.01)". A per-method p-value
+        from spearmanr() only tests ρ ≠ 0, not ρ_A > ρ_B. Here we resample
+        paired indices on the shared similar-pair pool and compute the
+        empirical distribution of Δρ = ρ_A − ρ_B; one-sided p = fraction of
+        resamples with Δρ ≤ 0.
+
+        Both scopes are reported:
+          - "per_dataset": one test per (method_a, method_b, target) triple.
+          - "pooled": one test per (method_a, method_b) across the concatenated
+            pair set from every target. Uses a naive flat bootstrap that
+            ignores within-target dependence (cluster-bootstrap is a possible
+            follow-up); over-states power but is the standard headline number
+            in the literature.
+
+        Output: `cross_method_significance.csv` in exp_results_dir.
+        """
+        from itertools import permutations
+
+        rng = np.random.default_rng(seed)
+        rows: list[dict] = []
+
+        # ---- per-dataset ----
+        for ds_id in self.datasets:
+            per_method: dict[str, pd.DataFrame] = {}
+            for m_id in method_ids:
+                p = result_dir(self.id, m_id, ds_id) / "pairs.csv"
+                if not p.exists():
+                    continue
+                df = pd.read_csv(p)
+                if len(df) >= 10:
+                    per_method[m_id] = df
+            if len(per_method) < 2:
+                continue
+
+            ref_mid = next(iter(per_method))
+            ref_a = per_method[ref_mid]["a"].to_numpy()
+            ref_b = per_method[ref_mid]["b"].to_numpy()
+
+            cache_deltas: dict[tuple[str, str], tuple[np.ndarray, float, float, float]] = {}
+            for ma, mb in permutations(per_method.keys(), 2):
+                df_a = per_method[ma]
+                df_b = per_method[mb]
+                if not (
+                    np.array_equal(df_a["a"].to_numpy(), ref_a)
+                    and np.array_equal(df_a["b"].to_numpy(), ref_b)
+                    and np.array_equal(df_b["a"].to_numpy(), ref_a)
+                    and np.array_equal(df_b["b"].to_numpy(), ref_b)
+                ):
+                    print(f"  [{self.id}] skip {ma} vs {mb} on {ds_id}: pair pools differ")
+                    continue
+
+                key = (ma, mb)
+                rev = (mb, ma)
+                if rev in cache_deltas:
+                    deltas_rev, rho_b, rho_a, n = cache_deltas[rev]
+                    deltas = -deltas_rev
+                else:
+                    d_pY = df_a["delta_pY_abs"].to_numpy()
+                    d_a = df_a["distance"].to_numpy()
+                    d_b = df_b["distance"].to_numpy()
+                    n = len(d_pY)
+                    rho_a = float(spearmanr(d_a, d_pY).correlation)
+                    rho_b = float(spearmanr(d_b, d_pY).correlation)
+                    deltas = _bootstrap_delta_rho(d_a, d_b, d_pY, n_bootstrap, rng)
+                    cache_deltas[key] = (deltas, rho_a, rho_b, n)
+
+                delta_obs = rho_a - rho_b
+                p_one_sided = float(np.mean(deltas <= 0))
+                ci_low = float(np.percentile(deltas, 2.5))
+                ci_high = float(np.percentile(deltas, 97.5))
+
+                rows.append({
+                    "scope": "per_dataset",
+                    "dataset": ds_id,
+                    "method_a": ma,
+                    "method_b": mb,
+                    "n_pairs": int(n),
+                    "rho_a": rho_a,
+                    "rho_b": rho_b,
+                    "delta_rho": delta_obs,
+                    "p_one_sided": p_one_sided,
+                    "ci_low_95": ci_low,
+                    "ci_high_95": ci_high,
+                })
+
+        # ---- pooled across all targets ----
+        pooled = {m_id: self._load_pooled(m_id) for m_id in method_ids}
+        pooled = {m_id: df for m_id, df in pooled.items() if not df.empty}
+        if len(pooled) >= 2:
+            first = next(iter(pooled))
+            merged = pooled[first][["a", "b", "dataset", "delta_pY_abs"]].copy()
+            for m_id in pooled:
+                merged = merged.merge(
+                    pooled[m_id][["a", "b", "dataset", "distance"]].rename(
+                        columns={"distance": f"d_{m_id}"}
+                    ),
+                    on=["a", "b", "dataset"],
+                    how="inner",
+                )
+            if len(merged) >= 10:
+                d_pY = merged["delta_pY_abs"].to_numpy()
+                cache_deltas = {}
+                for ma, mb in permutations(pooled.keys(), 2):
+                    rev = (mb, ma)
+                    if rev in cache_deltas:
+                        deltas_rev, rho_b, rho_a, n = cache_deltas[rev]
+                        deltas = -deltas_rev
+                    else:
+                        d_a = merged[f"d_{ma}"].to_numpy()
+                        d_b = merged[f"d_{mb}"].to_numpy()
+                        n = len(d_pY)
+                        rho_a = float(spearmanr(d_a, d_pY).correlation)
+                        rho_b = float(spearmanr(d_b, d_pY).correlation)
+                        deltas = _bootstrap_delta_rho(d_a, d_b, d_pY, n_bootstrap, rng)
+                        cache_deltas[(ma, mb)] = (deltas, rho_a, rho_b, n)
+                    delta_obs = rho_a - rho_b
+                    rows.append({
+                        "scope": "pooled",
+                        "dataset": "ALL",
+                        "method_a": ma,
+                        "method_b": mb,
+                        "n_pairs": int(n),
+                        "rho_a": rho_a,
+                        "rho_b": rho_b,
+                        "delta_rho": delta_obs,
+                        "p_one_sided": float(np.mean(deltas <= 0)),
+                        "ci_low_95": float(np.percentile(deltas, 2.5)),
+                        "ci_high_95": float(np.percentile(deltas, 97.5)),
+                    })
+
+        df_out = pd.DataFrame(rows)
+        out_csv = exp_results_dir / "cross_method_significance.csv"
+        df_out.to_csv(out_csv, index=False)
+        print(
+            f"  [{self.id}] cross-method significance: {len(df_out)} comparisons "
+            f"(n_bootstrap={n_bootstrap}) -> {out_csv}"
+        )
+        return df_out
+
+    def _plot_significance_heatmap(self, plots_dir: Path, df: pd.DataFrame) -> None:
+        """Heatmap of pooled one-sided p-values for ρ_A > ρ_B.
+
+        Row = method_a (claimed-better), col = method_b (baseline). Color
+        encodes -log10(p), capped at 4 (p ≤ 1e-4). Green = significantly
+        better at α = 0.01, yellow = α = 0.05, red = not significant.
+        """
+        pooled = df[df["scope"] == "pooled"]
+        if pooled.empty:
+            return
+        methods = sorted(set(pooled["method_a"]) | set(pooled["method_b"]))
+        n = len(methods)
+        if n < 2:
+            return
+        p_matrix = np.full((n, n), np.nan)
+        for _, row in pooled.iterrows():
+            i = methods.index(row["method_a"])
+            j = methods.index(row["method_b"])
+            p_matrix[i, j] = row["p_one_sided"]
+
+        log_p = -np.log10(np.maximum(p_matrix, 1e-4))
+        fig, ax = plt.subplots(figsize=(1.6 * n + 1.5, 1.6 * n))
+        im = ax.imshow(log_p, cmap="RdYlGn", vmin=0, vmax=4)
+        ax.set_xticks(range(n))
+        ax.set_yticks(range(n))
+        ax.set_xticklabels(methods)
+        ax.set_yticklabels(methods)
+        ax.set_xlabel("method_b (baseline)")
+        ax.set_ylabel("method_a (claimed better)")
+        ax.set_title(
+            "EXP-4 pooled: one-sided p(ρ_A > ρ_B)\n"
+            "green = significantly better at α=0.01"
+        )
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    ax.text(j, i, "—", ha="center", va="center", color="grey")
+                    continue
+                p = p_matrix[i, j]
+                if np.isnan(p):
+                    continue
+                text = f"{p:.3f}" if p >= 0.001 else "<0.001"
+                color = "white" if log_p[i, j] > 2 else "black"
+                ax.text(j, i, text, ha="center", va="center", color=color, fontsize=9)
+        fig.colorbar(im, ax=ax, label="−log10(p)")
+        fig.tight_layout()
+        fig.savefig(plots_dir / "cross_method_significance.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
 
     def _plot_cliff_violin(self, plots_dir: Path, method_ids: list[str]) -> None:
         n = len(method_ids)

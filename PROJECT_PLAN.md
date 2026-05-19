@@ -53,15 +53,16 @@ All baselines must be computed on the same molecule sets as MUT. When applicable
 | B8 | Gaussian shape + color Tanimoto (ROCS-equivalent) | 3D shape+field | combo Tanimoto from overlay | RDKit `rdShapeAlign` (PAPER algorithm, [Grant et al. 1996](https://doi.org/10.1021/jp951631s); BSD-licensed open-source port of the OpenEye ROCS approach) |
 | B9 | USR (12-d) | 3D shape | vector / inverse-Manhattan | Ballester & Richards 2007 |
 | B10 | USRCAT (60-d, pharmacophoric) | 3D shape+pharmacophore | vector / inverse-Manhattan | [Schreyer & Blundell 2012](https://doi.org/10.1186/1758-2946-4-27) |
-| B11 | eSim (electrostatic field + shape) | 3D field | similarity from overlay | [Jain 2020](https://doi.org/10.1007/s10822-019-00236-6) |
+| B11 | eSim (electrostatic field + shape) — ships as two variants `B11-shape` (shape-driven pose search via `rdShapeAlign.AlignMol`) and `B11-o3a` (atom-correspondence alignment via `rdMolAlign.GetCrippenO3A`) | 3D field | combo from overlay: `1 - 0.5 * (espsim.GetShapeSim + espsim.GetEspSim)` with MMFF charges (renormalised Carbo) | Cites [Jain 2020](https://doi.org/10.1007/s10822-019-00236-6) (proprietary). Implementation uses `espsim` ([Bolcato et al. JCIM 2022](https://doi.org/10.1021/acs.jcim.1c01535), MIT, [hesther/espsim](https://github.com/hesther/espsim)) — same OSS-substitute pattern as B8. B11-o3a uses **Crippen-O3A** (LogP/MR atomic contributions) rather than MMFF-O3A; the choice is load-bearing on two dimensions: (1) **speed** — Crippen is ~1.4× faster on small-molecule series (EXP-1/2) and ~1.8× faster on drug-like libraries (EXP-3a/3b), because MMFF-O3A's correspondence search scales poorly with atom count and pre-caching MMFF properties saves nothing (the bottleneck is inside the C++ optimiser); (2) **EXP-2 conjugation-specificity** — switching MMFF→Crippen widens the S6−S7 silhouette gap from −0.079 (anti-specific: S6 0.292, S7 0.371) to +0.206 (properly specific: S6 0.213, S7 0.007), making B11-o3a the cleanest control-aware result in the panel; this is genuine signal, not just a numerical shift. Identical to MMFF on substituent-conserved series (e.g. Hammett benzoic acids, Δ ≤ 0.001), Spearman 0.89 on diverse drug-like pairs (retrieval ranks may shift a place or two). Both variants are per-pair (asymmetric); experiments that build self-matrices must symmetrise. B11-o3a's atom-correspondence search can pick a symmetry-mapped mapping for symmetric molecules, producing a non-zero self-distance (up to ~0.4 for monosubstituted benzene/cyclohexane analogues under Crippen typing); this affects symmetrised self-matrices only at the diagonal (zeroed before MDS in EXP-2) and is intrinsic to atom-correspondence aligners. |
 | B12 | Mol2vec (300-d) | Learned | vector / cosine | [Jaeger et al. 2018](https://doi.org/10.1021/acs.jcim.7b00616), [repo](https://github.com/samoturk/mol2vec) |
 | B13 | Uni-Mol embedding | Learned 3D | vector / cosine | [Zhou et al. ICLR 2023](https://openreview.net/forum?id=6K2RM6wVqKu), [repo](https://github.com/deepmodeling/Uni-Mol) |
 | B14 | Chemprop D-MPNN hidden state | Learned 2D | vector / cosine | [Yang et al. 2019](https://doi.org/10.1021/acs.jcim.9b00237), [repo](https://github.com/chemprop/chemprop) |
 | B15 | Coulomb Matrix | QM-inspired | matrix / Frobenius or kernel | Rupp et al. 2012 |
 | B16 | SOAP | QM-inspired | vector / kernel | Bartók et al. 2013 (use DScribe lib) |
 | B17 | ACSF (Behler-Parrinello) | QM-inspired | vector / Euclidean | Behler 2011 (use DScribe lib) |
+| B18 | BCL::Mol2D atom-environment descriptor (574-d count vector, atom-type encoding, height=1 — published defaults of BCL's `UMol2D` invocation) | Physicochemical / 2D | vector / cosine | [Vu et al. JCAMD 2019](https://doi.org/10.1007/s10822-019-00199-8). Implementation invokes BCL's `bcl.exe molecule:Properties -tabulate UMol2D` per dataset via subprocess (one batched call, no per-mol overhead). BCL is a closed-source C++ binary whose [license](https://github.com/BCLCommons/bcl/blob/master/LICENSE) forbids redistribution — the path is read from `BCL_BIN` in `eddde/local_settings.py` (gitignored; copy from [`local_settings.example.py`](eddde/local_settings.example.py)). When unset, B18 silently does not register; every other method is unaffected. See [CLAUDE.md](CLAUDE.md) §Environment for the install + config sequence. **TODO cite (Spinnaker)**: in-preparation paper, leave as placeholder until publication. |
 
-**Baseline groupings for analysis:** Topological (B1–B6), Physicochemical (B7), 3D-structural (B8–B11), Learned (B12–B14), QM-descriptor (B15–B17).
+**Baseline groupings for analysis:** Topological (B1–B6), Physicochemical (B7, B18), 3D-structural (B8–B11), Learned (B12–B14), QM-descriptor (B15–B17).
 
 **Rationale for QM-descriptor baselines:** Critical for isolating whether any MUT advantage stems from electron density specifically, vs. QM information in general.
 
@@ -69,18 +70,155 @@ All baselines must be computed on the same molecule sets as MUT. When applicable
 
 ### 3.2 Methods Under Test (MUTs)
 
-MUTs condense the `(n_atoms, 127)` ElektroNN coefficient matrix into a fixed-size embedding paired with a distance function. All variants share the same upstream stage (`Stage.ELEKTRONN_COEFFS`) and are registered in `eddde/methods/muts/`. Each variant gets its own stable `id` so benchmark outputs can distinguish condensing schemes.
+MUTs condense the `(n_atoms, 127)` ElektroNN coefficient matrix into a fixed-size embedding paired with a distance function. All variants share the same upstream stage (`Stage.ELEKTRONN_COEFFS`) and are registered in [eddde/methods/muts/](eddde/methods/muts/). Each variant gets its own stable `id` so benchmark outputs can distinguish condensing schemes.
 
-| ID | Condensing scheme | Distance | Status | Rationale |
-|----|-------------------|----------|--------|-----------|
-| MUT-mean | Mean over atoms → `(127,)` | Euclidean (L2) | implemented | Simplest sensible baseline. Coefficients are homogeneous (same basis), so L2 respects magnitude as real chemical signal; mean over atoms already normalises for molecule size. |
-| MUT-mean-cosine | Mean over atoms → `(127,)` | Cosine | planned | A/B against MUT-mean to test whether magnitude carries signal or washes out. If cosine matches or beats L2, the direction of the coefficient vector is what matters, not its length. |
-| MUT-mean-irrep-weighted | Mean over atoms → `(127,)`, then weighted L2 with per-irrep weights | Weighted Euclidean | planned | The 127 dims are **not** equivalent: they split as 14 scalars (0e) + 42 vectors (14×3, 1o) + 25 d (5×5, 2e) + 28 f (4×7, 3o) + 18 g (2×9, 4e). Plain L2 treats every dim equally; per-irrep weights (uniform, equal-per-channel, or tuned on a validation split) test whether certain angular-momentum channels carry disproportionate similarity signal. |
-| MUT-mean-mahalanobis | Mean over atoms → `(127,)`, then Mahalanobis with inverse covariance from training-set statistics | Mahalanobis | planned | Accounts for dimension-wise scale differences and between-dimension correlations in the pooled coefficient space. The covariance is a learned object — fit once on a training split, reused at inference. More principled than fixed per-irrep weights when correlations matter. |
+The variant family is organised into **five strains** by design philosophy. Each strain produces a coherent set of ablations and varies one design knob at a time:
 
-**Training-data fairness constraint:** Any learned component — whether on the embedding side (attention weights, pooled GNN parameters) or the distance side (Mahalanobis covariance, tuned irrep weights) — must be fit only on a held-out training split. It must **never** see the evaluation datasets (D3–D9). This keeps the comparison with baselines fair and rules out leakage as an explanation for MUT performance. Trainable MUTs are explicitly allowed as the variant family matures; early variants (MUT-mean and the three listed above) keep the embedding non-trainable on purpose, so we can first characterise the raw signal in the coefficients before adding representation learning.
+- **Strain A — scalar-invariant mean pooling** (§3.2.2). Cheap, rotation-invariant, geometry-free.
+- **Strain B — equivariant central-atom pooling via e3nn tensor product** (§3.2.3). Rotation-invariant by construction, geometry-aware.
+- **Strain C — vector-valued Gromov-Wasserstein** (§3.2.4). Captures intra-molecular structural correspondences; six-rung ladder from [docs/strain_c_vector_valued_gw.md](docs/strain_c_vector_valued_gw.md).
+- **Strain D — topological / persistence diagrams** (§3.2.5). **Deferred** pending collaborator code drop.
+- **Strain E — hybrid / fused OT** (§3.2.6). Bridges Strain A (features only) and Strain C (geometry-dominant).
 
-**Future directions (not yet scoped):** attention-pooled condensing (learned per-atom weights), graph-pooled condensing (aggregate using `adjacencies` / `distances`, possibly via a small GNN), per-atom-type pooled embedding (separate mean per element, concatenated). These are candidates for trainable-embedding MUTs once the non-trainable baseline is established.
+**Training-data fairness constraint.** Any learned component — embedding-side (attention weights, learned radial filters, channel-mixing weights `W`) or distance-side (Mahalanobis covariance, tuned irrep weights, learned `W` in GW) — must be fit only on a held-out training split. It must **never** see the evaluation datasets (D3–D9). This rules out leakage as an explanation for MUT performance. Trainable MUTs are explicitly allowed as the variant family matures; the strains below sequence non-trainable variants first so we characterise the raw signal in the coefficients before adding representation learning.
+
+#### 3.2.1 Cross-cutting requirement — equivariance audit
+
+Every MUT must pass three contract tests at registration time, exercised on a small sample (3–5 molecules from a fixed fixture):
+
+1. **Rotation invariance.** Apply a random R ∈ SO(3) to atom positions, propagate through whatever stages the MUT depends on (re-running ElektroNN if it is not itself equivariant; substituting rotated positions in the cached conformer object otherwise). Recompute the embedding. Assert `d(emb(M), emb(R·M)) < ε_rot` (default `1e-3` after symmetrisation for asymmetric distances).
+2. **Permutation invariance.** Random atom-index permutation applied jointly to positions and coefficient rows. Assert `d(emb(M), emb(P·M)) < ε_perm`.
+3. **Identity.** `d(M, M) == 0` exactly for symmetric distances; `< ε_id` after symmetrisation for asymmetric ones.
+
+These tests live next to [eddde/methods/base.py](eddde/methods/base.py) and run automatically when `Method.__init_subclass__` is invoked, before the runner ever uses the MUT. Failures block registration with a clear error. The point is not to add a unit-test suite (still none, per CLAUDE.md) but to make rotation/permutation correctness part of the MUT contract — the same shape of guarantee as the existing `distance()`-XOR-`distances()` requirement.
+
+#### 3.2.2 Strain A — Scalar-invariant mean pooling
+
+**Scalarisation step (shared across the strain).** ElektroNN's 127 dims decompose by irrep as 14×0e + 14×1o + 5×2e + 4×3o + 2×4e. The l>0 blocks transform by D^(l)(R) under rotation, so a raw mean of the 127-d per-atom vector is **not** SO(3)-invariant — different conformer orientations of the same molecule produce different embeddings. The strain instead collapses each l>0 multiplicity to its 2-norm in the (2l+1)-dim irrep subspace, producing **39 invariants per atom**: 14 scalars + 14 l=1 norms + 5 l=2 norms + 4 l=3 norms + 2 l=4 norms. These 39 dims pass the rotation audit by construction. Pool across atoms to produce a per-molecule (39,) embedding.
+
+| ID | Pooling | Distance | Status | Rationale |
+|----|---------|----------|--------|-----------|
+| MUT-mean | Mean over atoms → `(39,)` | Euclidean | **needs refactor** | Was raw 127-d mean (rotation-leaky); spec now requires scalarisation. Bump version string and re-cache. Simplest sensible baseline for the strain — coefficients are homogeneous (same basis), L2 respects irrep-norm magnitudes as real chemical signal, mean already normalises for molecule size. |
+| MUT-mean-cosine | Mean over atoms → `(39,)` | Cosine | planned | A/B against MUT-mean to test whether magnitude carries signal or washes out. |
+| MUT-mean-irrep-weighted | Mean over atoms → `(39,)`; weighted L2 with one weight per irrep (5 weights: 0e, 1o, 2e, 3o, 4e) | Weighted Euclidean | planned | Tests whether certain angular-momentum channels carry disproportionate similarity signal. Schemes to try: uniform, equal-per-channel-size (1/14, 1/14, 1/5, 1/4, 1/2), tuned on a validation split. |
+| MUT-mean-mahalanobis | Mean over atoms → `(39,)`; Mahalanobis with inverse covariance from training-set statistics | Mahalanobis | planned | Generalises irrep weighting to handle between-dimension correlations. Covariance fit once on a held-out training split (e.g. a ChEMBL sample), reused at inference. |
+| MUT-mean-max | Max (componentwise) over atoms → `(39,)` | Euclidean | planned (control) | "Is there any atom with extreme feature X?" Tests the additivity assumption of mean-pooling. |
+| MUT-mean-perelement | Mean within each element type (H, C, N, O, F, S, Cl), concat → 7×39 = 273-d (missing elements get zero blocks) | Euclidean | planned (control) | Picks up composition signal that pooled mean averages away. |
+| MUT-mean-laplacian | Apply `(I + αL)⁻¹` smoothing on per-atom features using normalised graph Laplacian `L` from `adjacencies` before pooling → `(39,)` | Euclidean | planned (control) | Cheap non-trainable smoothing that injects topology without a GNN. α as fixed hyperparameter (default 1.0). Bridges naive mean-pool and full message passing. |
+| MUT-mean-randproj | Mean over atoms → `(39,)` → random 32-d projection (fixed seed) | Euclidean | planned (control) | Negative control: if a downstream MUT beats this *by a margin*, the gain isn't from the pooled-mean direction alone. If it doesn't, the embedding's similarity signal is largely captured by a low-dim projection of the mean. |
+
+#### 3.2.3 Strain B — Equivariant central-atom pooling (e3nn)
+
+Implementation details (SH-convention verification protocol, centroid edge cases, output flattening order, per-variant defaults, rotation-audit recipe) are in [docs/strain_b_e3nn_central_atom.md](docs/strain_b_e3nn_central_atom.md).
+
+**Construction.** Build a single artificial central point and collect equivariant messages from every atom via one round of e3nn tensor product, projected onto l=0 outputs. The result is **SO(3)-invariant by construction** (contraction of two copies of irrep l → trivial irrep), **translation-invariant** (relative positions), and **permutation-invariant** (sum over atoms).
+
+Per molecule:
+
+1. Centre **c** = centroid of atom positions (variants: `‖a_j‖₂`-weighted centroid for the density-centered variant).
+2. For each atom j: relative position `r_jc = r_j − c`, distance `d_j`, direction `Ω_j = r_jc / d_j`.
+3. For each l ∈ {0, 1, 2, 3, 4} and each multiplicity m of irrep l, contract the per-atom irrep-(l, m) subspace with `Y^(l)(Ω_j)` (the (2l+1)-dim real spherical harmonic at direction Ω_j). Result: one scalar per (atom, l, m).
+4. Aggregate over atoms with a radial weight `R_k(d_j)`:
+
+   `out_{l, m, k} = Σ_j R_k(d_j) · ⟨x_j^{(l, m)}, Y^{(l)}(Ω_j)⟩`
+
+5. Concatenate across (l, multiplicity, radial channel k) → fixed-size vector of dimension `K × 39`.
+
+This is mathematically equivalent to a radially-weighted spherical-harmonic projection of the per-atom feature field — the same family as SOAP, specialised to the ElektroNN basis. The "all-zero artificial central atom" framing is incidental; what matters is the equivariant projection onto a single centre.
+
+**Convention prerequisite.** ElektroNN's irrep features must be in the same SH convention as e3nn (real SHs, e3nn's normalisation, e3nn's per-`l` component ordering). Verify once before implementation via the rotation-consistency test in [docs/strain_b_e3nn_central_atom.md §3](docs/strain_b_e3nn_central_atom.md); if conventions differ, derive and apply a one-time per-`l` basis transform to the cached coefficients (analogous to the GW-R5 overlap matrix in §3.2.4).
+
+| ID | Centre | Radial K | Distance | Status | Rationale |
+|----|--------|---------|----------|--------|-----------|
+| MUT-e3nn-uniform | Geometric centroid | K=1, `R(d)=1` | Euclidean | planned | Simplest e3nn variant; per-atom contributions weighted only by the SH projection itself. May cancel in highly symmetric molecules — informative either way. |
+| MUT-e3nn-1overR | Geometric centroid | K=1, `R(d)=1/(d+ε)` with ε=0.1 Å | Euclidean | planned | Near-atoms dominate (USR-like radial weighting). |
+| MUT-e3nn-radial | Geometric centroid | K=8 Gaussians, centres uniformly on [0, 10] Å, σ = grid spacing | Euclidean | planned | Multi-shell radial decomposition. Output dim 8 × 39 = 312. |
+| MUT-e3nn-densitycenter | `‖a_j‖₂`-weighted centroid | K=8 Gaussians (as above) | Euclidean | planned | Centre tracks where the electron density is, not where the atom skeleton is. |
+| MUT-e3nn-cosine | Geometric centroid | K=8 Gaussians | Cosine | planned | A/B for whether magnitude or direction of the equivariant projection matters. |
+
+**Trainable extension (deferred).** Learn radial filter shapes (Bessel basis with learnable cutoff) and/or per-(l, multiplicity) weights via contrastive loss on a held-out ChEMBL training split. Acts as the ceiling for the strain. Subject to the fairness rule.
+
+**Multi-hop extension (deferred).** A single central-atom hop captures one-shell radial structure but misses inter-atomic relations. The natural extension is full equivariant message passing (multiple e3nn `FullyConnectedTensorProduct` layers, no central atom, pool to l=0 at the end). Trainable; treat as future work once non-trainable variants are characterised.
+
+#### 3.2.4 Strain C — Vector-valued Gromov-Wasserstein
+
+Six-rung ladder following [docs/strain_c_vector_valued_gw.md](docs/strain_c_vector_valued_gw.md) verbatim. Each rung is an ablation result that isolates one piece of the physical structure. R1 and R3 use POT's `ot.gromov.gromov_wasserstein` directly (no new code). R2, R4, R5 require a new 4-index vector-valued GW solver (per §3 of the guide); R6 is deferred research-grade work.
+
+| ID | `d_X` (geometry) | Features per atom | `W` (channel mix) | Solver | Status |
+|----|------------------|-------------------|-------------------|--------|--------|
+| MUT-GW-R1 | bond-graph shortest path | `‖a_j‖₂` (scalar collapse) | — | POT scalar GW | planned |
+| MUT-GW-R2 | bond-graph shortest path | full 127-d vector (squared per channel, §3.4) | `I` (channel-diagonal cost) | **needs new 4-index solver** | planned |
+| MUT-GW-R3 | Euclidean | full 127-d vector (squared) | `I` | POT scalar GW (with reshape) — but rotation-leaky on features by design (informative failure of rotation audit, §3.2.1) | planned |
+| MUT-GW-R4 | Euclidean | power spectrum (5 scalars per atom: norm per l) | diag, per-l weights (uniform default) | **needs new 4-index solver** | planned |
+| MUT-GW-R5 | Euclidean | full 127-d vector | basis-set overlap matrix `S` (PSD, ridge-regularised `S + εI`) | **needs new 4-index solver** | planned |
+| MUT-GW-R6 | tensor-valued via bond-local frames | full vector | overlap `S` | research-grade; sketched in guide §1.4 + §3.5 | **deferred** |
+
+**Prerequisite — basis-set overlap export.** R5 requires the ElektroNN basis-set overlap matrix `S ∈ R^{127×127}`. Compute once via `pyscf.gto.intor("int1e_ovlp")` (or pull from ElektroNN's basis definition) and commit as `eddde/methods/muts/elektronn_overlap.npy` with a sidecar JSON documenting basis definition and convention. Without `S`, R5 is not defined.
+
+**Convention decisions (adopt verbatim from the guide).**
+
+- **Sign handling (§3.4).** Square coefficients per channel at R2/R3 (raw SH coefficients can be negative); switch to per-l power spectrum at R4+ (nonnegative by construction). Document once at the strain entry point.
+- **ε self-loop (§3.2).** Default `ε = 0.5 · min_{i≠j} d_X(i, j)` per molecule. Avoids `Δ(A, B) = 0` when two molecules differ only in features at coincident positions.
+- **`p` (§3.3).** Default `p = 2`. Treat as a hyperparameter at the metric-learning stage.
+- **Initialisation (§3.1).** Warm-start the 4-index plan from the scalar GW solution at R2+ to avoid local minima.
+
+**Per-experiment feasibility (estimates, revise after first benchmark).** GW is per-pair and slow:
+
+| Rung | s/pair (est.) | EXP-1/2 (~10–50 mol) | EXP-3a/b (~10⁴ pairs/target) | EXP-4/5/6 |
+|------|---------------|----------------------|-------------------------------|-----------|
+| R1   | ~10⁻²         | trivial              | feasible                      | feasible  |
+| R3   | ~10⁻²         | trivial              | feasible                      | feasible  |
+| R2   | ~1            | feasible             | tight (~3h/target w/ pool)    | feasible w/ pool |
+| R4   | ~1            | feasible             | tight                         | feasible  |
+| R5   | 10–60         | feasible             | **infeasible w/o caching/approx** | EXP-5b only (small) |
+
+R5 likely runs only on internal experiments (EXP-1, EXP-2, EXP-5b classical pairs) before metric learning or sparse approximations enable retrieval-scale use.
+
+**Trainable extension (deferred).** Parameterise `W = W₀ + θ` at R5 with `W₀` the overlap matrix and `θ` a learnable PSD perturbation (Cholesky parameterisation per guide §4.7). Contrastive outer loop on a held-out training split. Subject to the fairness rule.
+
+#### 3.2.5 Strain D — Topological / persistence
+
+Two collaborator scripts (`umap_eucldist.py` and `umap_wassdist.py`, since removed; recipe preserved in [docs/strain_d_topological.md](docs/strain_d_topological.md)) plus [geo_topo_baseline.pdf](geo_topo_baseline.pdf) together tightened the spec for this strain:
+
+- **"Barycenter" in the collaborator code is `np.mean(features, axis=0)`** on the (n_atoms, 127) matrix — identical to the original MUT-mean. There is no distinct geometric "barycentric coordinate" variant; the concept folds into Strain A and is dropped from this strain.
+- **The collaborator persistence recipe is Vietoris-Rips on the per-atom feature cloud, not on 3D positions.** Each molecule's (n_atoms, 127) matrix was treated as a point cloud in 127-d feature space; VR via `ripser` (maxdim=1); only H1 retained; pairwise Wasserstein via `persim.wasserstein`.
+
+Direct adoption of the collaborator code would inherit two §3.2.1 audit failures:
+
+1. **Rotation leakage.** Euclidean distance in raw 127-d feature space changes under molecular rotation (l>0 blocks transform by `D^(l)(R)`); the VR filtration shifts and so does the PD. Same root cause as the pre-refactor MUT-mean bug.
+2. **H1 only.** H0 (connected components — closely related to single-linkage clustering of the point cloud) is dropped silently. For small molecules H1 is often empty, making Wasserstein degenerate. H0 carries the bulk of the signal for typical drug-like sizes; report both.
+
+The fix is the same scalarisation as Strain A — feed the 39-d per-atom invariants into VR — plus 3D-position and hybrid filtrations as ablations, and persistence-landscape variants for retrieval-scale use.
+
+| ID | Filtration | Homology | Distance | Status | Rationale |
+|----|------------|----------|----------|--------|-----------|
+| MUT-TDA-PD-featinv | VR on 39-d scalarised per-atom features | H0 + H1, summed | Wasserstein on PDs (`persim.wasserstein`) | planned | Rotation-invariant fix of the collaborator recipe. |
+| MUT-TDA-PD-pos | VR on 3D atom positions | H0 + H1, summed | Wasserstein | planned | Purely geometric — isolates how much PD signal lives in shape vs features. |
+| MUT-TDA-PD-poswfeat | VR on stacked `(3D position, λ · 39-d scalarised features)` with feature-scale knob λ | H0 + H1, summed | Wasserstein | planned | Hybrid filtration; λ tuned on a held-out training split (fairness rule applies). |
+| MUT-TDA-PL-featinv | Same filtration as `MUT-TDA-PD-featinv` | H0 + H1, concat | Persistence landscapes, L1 in functional space | planned | Vectorisable — scales to EXP-3 retrieval where PD-Wasserstein is too slow. |
+| MUT-TDA-PL-pos | Same as `MUT-TDA-PD-pos` | H0 + H1, concat | Persistence landscapes, L1 | planned | Geometric landscape; retrieval-scale. |
+
+**Dropped from the original placeholder.**
+- ~~MUT-barycentric~~ — collapses to MUT-mean per the collaborator code.
+- ~~MUT-TDA-PD-feat (raw 127-d feature VR)~~ — matches the collaborator recipe exactly but is rotation-leaky; dropped per the same logic that replaced raw MUT-mean with the scalarised version (see [docs/strain_d_topological.md §2](docs/strain_d_topological.md)).
+
+**Dependencies.** `ripser` (Vietoris-Rips), `persim` (PD Wasserstein, persistence landscapes). Add to `pyproject.toml` when this strain is implemented.
+
+**Cost.** `ripser` on small point clouds (≤50 atoms) is ms-scale. PD-Wasserstein is `O(k³)` in PD size `k` via optimal matching — usually fine because diagrams are small. Persistence landscapes vectorise into fixed-size arrays and use standard L1/L2; retrieval-scale by construction. Strain D should be fast enough for all experiments without process-pool fanout.
+
+#### 3.2.6 Strain E — Hybrid / fused OT
+
+Bridges Strain A (features only) and Strain C (geometry-dominant). All variants operate on the scalarised 39-d per-atom features from §3.2.2 to preserve rotation invariance.
+
+| ID | Description | Distance | Status |
+|----|-------------|----------|--------|
+| MUT-feat-wasserstein | Treat each molecule as a point cloud in R^39 (scalarised per-atom features), uniform mass per atom | 1-Wasserstein via POT `ot.emd2` on pairwise Euclidean cost | planned |
+| MUT-sliced-wasserstein | Same point cloud, sliced approximation | Sliced Wasserstein via POT `ot.sliced_wasserstein_distance` (default 50 projections) | planned (retrieval-scale variant) |
+| MUT-FGW-α, α ∈ {0.0, 0.25, 0.5, 0.75, 1.0} | Fused GW: `d² = α · d_GW²(geometry) + (1−α) · d_W²(features)`. Geometry = Euclidean distance matrix on atom positions. Features = 39-d scalarised per-atom features. Uniform per-atom mass. | POT `ot.fused_gromov_wasserstein2` | planned (5 variants in the sweep) |
+
+**Reference points.** `MUT-FGW-1.0` (geometry only) coincides with `MUT-GW-R3` operating on scalarised features. `MUT-FGW-0.0` (no geometry term in the GW sense — pure feature OT with uniform mass) coincides with `MUT-feat-wasserstein`. Report all five α values regardless; the sweep is the deliverable.
+
+**Trainable extension (deferred).** Learn α per-task on a held-out training split (single scalar; trivially fairness-compliant). Could also fold in a learned feature metric `W`.
 
 ---
 

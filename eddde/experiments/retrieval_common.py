@@ -104,6 +104,73 @@ def dcg_at_k(active_ranks, k: int = 100) -> float:
     return sum(1.0 / math.log2(r + 1) for r in active_ranks if r <= k)
 
 
+def _log_comb(n: int, k: int) -> float:
+    """Log of C(n, k) via lgamma — stable for the large pools EXP-6 sees."""
+    if k < 0 or k > n:
+        return float("-inf")
+    return math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
+
+
+def scafef_at_percent(
+    retrieved_scaffold_sets: list[list[int]],
+    scaffold_active_counts: dict[int, int],
+    n_total: int,
+    percent: float = 5.0,
+) -> float:
+    """Scaffold-aware enrichment factor at top-`percent`% of the ranking.
+
+    Numerator: distinct scaffolds in the union of scaffold sets of the
+        actives that ranked in the top-k% (where k = ceil(n_total*p/100)).
+    Denominator: expected count under uniformly random ranking.
+
+    Set semantics: each active carries the full list of scaffold buckets it
+    belongs to (from the dataset's scaffolds.json sidecar — Riniker-Landrum's
+    Schuffenhauer hierarchy can place an active in many buckets). An active
+    "hits" every scaffold in its set.
+
+    The denominator is computed exactly via the hypergeometric tail, no
+    Monte-Carlo or equal-cluster-size approximation:
+        P(scaffold s appears in top-k) = 1 - C(n_total - n_s, k) / C(n_total, k)
+    where n_s = number of pool actives whose scaffold set contains s. The
+    expectation is the sum over s of that probability. This is exact even
+    when actives belong to multiple buckets, so the analytical denominator
+    in the original plan (geometric approximation assuming equal cluster
+    sizes) is not needed.
+
+    Args:
+      retrieved_scaffold_sets: scaffold lists of the actives in top-k%.
+      scaffold_active_counts:  {scaffold_id: n_actives_in_pool_with_it}
+                               over the same pool (i.e. excluding the query).
+      n_total:                 pool size, excluding the query.
+      percent:                 top-k % cutoff.
+
+    Returns NaN if the pool or the scaffold count map is empty.
+    """
+    if n_total <= 0 or not scaffold_active_counts:
+        return float("nan")
+
+    k = max(1, math.ceil(n_total * percent / 100.0))
+    k = min(k, n_total)
+
+    observed = len({s for sids in retrieved_scaffold_sets for s in sids})
+
+    log_total = _log_comb(n_total, k)
+    expected = 0.0
+    for s, n_s in scaffold_active_counts.items():
+        if n_s <= 0:
+            continue
+        if n_total - n_s < k:
+            # All k-subsets must contain at least one s-bearing active.
+            expected += 1.0
+        else:
+            p_miss = math.exp(_log_comb(n_total - n_s, k) - log_total)
+            expected += 1.0 - p_miss
+
+    if expected <= 0:
+        return float("nan")
+    return observed / expected
+
+
 # ---------------------------------------------------------------------------
 # Aggregation helpers — silent over NaN so test-mode "no actives in this
 # split" cases don't drown the log in numpy warnings.

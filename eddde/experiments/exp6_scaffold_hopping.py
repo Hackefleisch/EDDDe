@@ -23,12 +23,18 @@ intended. Membership is many-to-many (Schuffenhauer hierarchy: one active
 can belong to multiple scaffold buckets), stored in the dataset's sidecar
 `cache/datasets/<id>/scaffolds.json` as {chembl_id: [scaf_id, ...]}.
 
-Status: Step 4 of scratch/exp6_implementation_plan.md. Sub-experiments A
-covers M-EF5, M-SCAFEF5, and M-SCAFRATIO. Sub-experiment B (leave-one-
-scaffold-out / M-RECALL-HELDOUT-SCAFFOLD) arrives in Step 5.
+Status: Step 5 of scratch/exp6_implementation_plan.md. Both sub-
+experiments implemented:
+  A: M-EF5, M-SCAFEF5, M-SCAFRATIO over 5 random query draws per target.
+  B: M-RECALL-HELDOUT-SCAFFOLD at 1/5/10 % via leave-one-scaffold-out on
+     targets with >= 5 distinct active scaffolds. Multi-bucket actives
+     appear as queries once per scaffold in their set — each (S, query)
+     pair tests one "perspective" on the chemistry.
 
 Output files written to `out/`:
   retrieval_standard.csv   (sub-experiment A, RETRIEVAL_COLS_EXP6 schema)
+  retrieval_heldout.csv    (sub-experiment B, RETRIEVAL_COLS_EXP6 schema;
+                            "seed" column carries the held-out scaffold S)
   metrics.json             (combined metric values)
 """
 from __future__ import annotations
@@ -58,6 +64,13 @@ N_QUERY_DRAWS = 5
 # (~100-1500 vs WelQrate's tens of thousands); the top 1 % cutoff would land
 # inside the first 5-10 ranks for small targets and bake in undue variance.
 EF_PERCENT_STANDARD = 5.0
+
+# Sub-experiment B eligibility floor and the percent cutoffs to report.
+MIN_SCAFFOLDS_FOR_HELDOUT = 5
+RECALL_PERCENTS = (1.0, 5.0, 10.0)
+# Which cutoff feeds the un-suffixed primary metric. 5 % matches M-EF5 and
+# is the spec's recommended default (plan §4.3 stratification note).
+RECALL_PRIMARY_PERCENT = 5.0
 
 
 # Extended schema: retrieval_common.RETRIEVAL_COLS plus the scaffold sets of
@@ -94,7 +107,7 @@ def _load_scaffold_map(dataset_id: str) -> dict[str, list[int]]:
 
 class Exp6ScaffoldHopping:
     id = "EXP-6"
-    version = "v0.3-scafef"
+    version = "v0.4-heldout"
     datasets = RINLAN_DATASET_IDS
 
     metric_direction = {
@@ -223,6 +236,78 @@ class Exp6ScaffoldHopping:
         metrics.update(rc.metric_entry("M-EF5",       seed_ef5))
         metrics.update(rc.metric_entry("M-SCAFEF5",   seed_scafef5))
         metrics.update(rc.metric_entry("M-SCAFRATIO", seed_scafratio))
+
+        # --- Sub-experiment B: leave-one-scaffold-out ---------------------
+        # Eligibility: targets must have at least MIN_SCAFFOLDS_FOR_HELDOUT
+        # distinct active scaffolds. Ineligible targets skip B entirely;
+        # M-RECALL-HELDOUT-SCAFFOLD is simply absent from their metrics.json
+        # and the SUMMARY table reads "—" for those cells.
+        distinct_scaffolds = sorted({s for sids in scaffold_map.values() for s in sids})
+        heldout_rows: list[dict] = []
+        recall_per_query: dict[float, list[float]] = {p: [] for p in RECALL_PERCENTS}
+
+        if len(distinct_scaffolds) >= MIN_SCAFFOLDS_FOR_HELDOUT and active_ids:
+            decoy_ids = [m for m in mol_ids if activity[m] == 0]
+            for s in distinct_scaffolds:
+                queries_s = [a for a in active_ids if s in scaffold_map.get(a, [])]
+                held_out_s = [a for a in active_ids if s not in scaffold_map.get(a, [])]
+                if not queries_s or not held_out_s:
+                    # Scaffold S where every active is also in some other bucket
+                    # that ends up being identical to S's bucket, or the
+                    # complement is empty — skip the round (no signal).
+                    continue
+
+                pool_s = decoy_ids + held_out_s
+                held_out_set = set(held_out_s)
+                n_total = len(pool_s)
+                n_targets = len(held_out_s)
+
+                # Queries-S and pool-S are disjoint by construction (queries
+                # have S in their scaffold set; held-out actives do not), so
+                # no self-column to remove.
+                D = pairwise_matrix(method, embeddings, queries_s, pool_s)
+
+                for i, q in enumerate(queries_s):
+                    q_scafs = scaffold_map.get(q, [])
+                    row = D[i]
+                    order = np.argsort(row, kind="stable")
+
+                    ranks_of_held_out: list[int] = []
+                    for rank_0, idx in enumerate(order):
+                        cid = pool_s[idx]
+                        if cid in held_out_set:
+                            rank = rank_0 + 1
+                            ranks_of_held_out.append(rank)
+                            heldout_rows.append({
+                                "seed": s,
+                                "query_id": q,
+                                "active_id": cid,
+                                "rank": rank,
+                                "distance": float(row[idx]),
+                                "n_total": n_total,
+                                "n_actives_in_pool": n_targets,
+                                "scaffold_ids": json.dumps(scaffold_map.get(cid, [])),
+                                "query_scaffold_ids": json.dumps(q_scafs),
+                            })
+
+                    for percent in RECALL_PERCENTS:
+                        recall_per_query[percent].append(
+                            rc.recall_at_percent(ranks_of_held_out, n_total,
+                                                 n_targets, percent=percent)
+                        )
+
+            pd.DataFrame(heldout_rows, columns=list(RETRIEVAL_COLS_EXP6)).to_csv(
+                out / "retrieval_heldout.csv", index=False)
+
+            for percent in RECALL_PERCENTS:
+                key = f"M-RECALL-HELDOUT-SCAFFOLD_at{int(percent)}pct"
+                metrics.update(rc.metric_entry(key, recall_per_query[percent]))
+            # Primary alias for the headline metric (un-suffixed) at the
+            # spec-recommended 5 % cutoff. Pulled from the suffixed mean/SE
+            # so there's exactly one source of truth.
+            primary_key = f"M-RECALL-HELDOUT-SCAFFOLD_at{int(RECALL_PRIMARY_PERCENT)}pct"
+            metrics["M-RECALL-HELDOUT-SCAFFOLD"]    = metrics[primary_key]
+            metrics["M-RECALL-HELDOUT-SCAFFOLD_se"] = metrics[f"{primary_key}_se"]
 
         (out / "metrics.json").write_text(rc.metrics_to_json(metrics))
         return metrics

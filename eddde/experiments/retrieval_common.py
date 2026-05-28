@@ -104,6 +104,20 @@ def dcg_at_k(active_ranks, k: int = 100) -> float:
     return sum(1.0 / math.log2(r + 1) for r in active_ranks if r <= k)
 
 
+def recall_at_percent(ranks, n_total: int, n_targets: int, percent: float = 5.0) -> float:
+    """Fraction of `n_targets` whose rank falls within the top-`percent`%.
+
+    Used by EXP-6 sub-experiment B: ranks of held-out actives in a pool
+    of `n_total` candidates (decoys + held-out actives). Same cutoff
+    rule as ef_at_percent — ceil(n_total * p/100), 1-indexed ranks.
+    """
+    if n_targets == 0:
+        return float("nan")
+    cutoff = math.ceil(n_total * percent / 100.0)
+    tp = sum(1 for r in ranks if r <= cutoff)
+    return tp / n_targets
+
+
 def _log_comb(n: int, k: int) -> float:
     """Log of C(n, k) via lgamma — stable for the large pools EXP-6 sees."""
     if k < 0 or k > n:

@@ -30,12 +30,25 @@ documented in PROJECT_PLAN.md (see scratch/exp6_implementation_plan.md §11.1).
 Each target becomes one Dataset subclass so the runner can track caching and
 staleness per target independently — same pattern as muv.py and welqrate.py.
 
-build_smiles() output schema:
+build_smiles() output schema (flat — matches MUV / WelQrate):
     id            chembl_id for actives, "decoy_<external_id>" for decoys
     smiles        canonical SMILES
     activity      1 (active) | 0 (decoy)
-    scaffold_id   non-negative int for actives (preserved from upstream),
-                  -1 for decoys
+
+Scaffold membership is stored separately in a sidecar JSON next to the
+SMILES CSV:
+    cache/datasets/<id>/scaffolds.json
+        {chembl_id: [scaffold_id, ...]}   actives only; decoys absent
+
+The upstream pickle is a many-to-many (active, scaffold) mapping (the
+Schuffenhauer 2007 hierarchy stores each active under every ancestor
+scaffold it instantiates). Materializing that as duplicate CSV rows
+breaks the runner's "one row per molecule" invariant (dataset_size, the
+conformer / coeff / embedding dicts all dedupe silently and end up
+inconsistent with the SMILES row count), so we deduplicate by ChEMBL ID
+and persist the full scaffold set in the sidecar. EXP-6 reads the JSON
+to compute scaffold-aware metrics; downstream pipeline stages see a
+plain SMILES CSV indistinguishable from MUV's.
 """
 
 from __future__ import annotations
@@ -43,15 +56,17 @@ from __future__ import annotations
 import gzip
 import hashlib
 import io
+import json
 import pickle
 import subprocess
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from ... import SEED
-from ..base import Dataset, CACHE_ROOT
+from ..base import Dataset, CACHE_ROOT, dataset_dir
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +118,7 @@ def _ensure_zinc_decoys() -> Path:
         return _ZINC_DECOYS_PATH
     _SHARED_RAW_DIR.mkdir(parents=True, exist_ok=True)
     url = f"{_RAW_BASE}/compounds/ChEMBL/cmp_list_ChEMBL_zinc_decoys.dat.gz"
-    print(f"[rinlan/shared] downloading ZINC decoy pool ...")
+    print(f"[_rinlan_shared:download] downloading ZINC decoy pool ...")
     _curl(url, _ZINC_DECOYS_PATH)
     return _ZINC_DECOYS_PATH
 
@@ -163,16 +178,25 @@ class _RinLanBase(Dataset):
         with open(actives_pkl, "rb") as f:
             scaf_to_actives = pickle.load(f, encoding="latin-1")
 
-        rows: list[dict] = []
+        # Upstream is a many-to-many (active, scaffold) mapping: the same
+        # ChEMBL ID can appear under multiple scaffold IDs (Schuffenhauer
+        # hierarchy — one entry per ancestor scaffold). Collapse to one row
+        # per molecule and persist the scaffold membership in the sidecar.
+        active_smiles: dict[str, str] = {}
+        scaffolds: dict[str, list[int]] = defaultdict(list)
         for scaf_id, active_list in scaf_to_actives.items():
             sid = int(scaf_id)  # upstream uses Decimal
             for chembl_id, smiles in active_list:
-                rows.append({
-                    "id": str(chembl_id),
-                    "smiles": str(smiles),
-                    "activity": 1,
-                    "scaffold_id": sid,
-                })
+                cid = str(chembl_id)
+                if cid not in active_smiles:
+                    active_smiles[cid] = str(smiles)
+                if sid not in scaffolds[cid]:
+                    scaffolds[cid].append(sid)
+
+        rows: list[dict] = [
+            {"id": cid, "smiles": smi, "activity": 1}
+            for cid, smi in active_smiles.items()
+        ]
 
         decoys = _read_zinc_decoys(zinc_pkl)
         rng = _seeded_rng(self._target_id)
@@ -184,17 +208,28 @@ class _RinLanBase(Dataset):
                 "id": f"decoy_{internal_id}",
                 "smiles": str(smiles),
                 "activity": 0,
-                "scaffold_id": -1,
             })
 
         df = pd.DataFrame(rows)
         df.to_csv(out, index=False)
-        n_act = int((df["activity"] == 1).sum())
-        n_dec = int((df["activity"] == 0).sum())
-        n_scaf = df.loc[df["activity"] == 1, "scaffold_id"].nunique()
+
+        # Sidecar: scaffold membership per active ChEMBL ID. Lives next to
+        # the SMILES CSV so it's bound to the dataset directory rather than
+        # the experiment; EXP-6 loads it on demand. Decoys are absent from
+        # the mapping (callers must default to "no scaffold" themselves).
+        scaffolds_json = dataset_dir(self.id) / "scaffolds.json"
+        scaffolds_json.write_text(
+            json.dumps({cid: sorted(sids) for cid, sids in scaffolds.items()},
+                       sort_keys=True)
+        )
+
+        n_act = len(active_smiles)
+        n_dec = len(df) - n_act
+        n_scaf = len({s for sids in scaffolds.values() for s in sids})
         print(
-            f"[{self.id}] wrote {len(df)} molecules to {out} "
-            f"({n_act} actives across {n_scaf} scaffolds, {n_dec} decoys)"
+            f"[{self.id}:smiles] wrote {len(df)} molecules to {out} "
+            f"({n_act} actives across {n_scaf} scaffolds, {n_dec} decoys); "
+            f"scaffold membership in {scaffolds_json.name}"
         )
 
     def test_mode_subsample(self, df: pd.DataFrame, n: int, rng):  # noqa: ANN001
@@ -218,7 +253,7 @@ def _make_dataset(target_id: str) -> _RinLanBase:
     cls = type(
         ds_id,
         (_RinLanBase,),
-        {"id": ds_id, "version": "v1", "_target_id": target_id},
+        {"id": ds_id, "version": "v2-dedup", "_target_id": target_id},
     )
     return cls()
 

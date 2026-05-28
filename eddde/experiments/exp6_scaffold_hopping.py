@@ -49,6 +49,7 @@ import numpy as np
 import pandas as pd
 
 from .. import SEED
+from ..cache import hash_file, is_stale, write_manifest
 from ..data.base import Stage, dataset_dir
 from ..data.sources.rinlan import RINLAN_DATASET_IDS
 from ..methods.distance import pairwise_matrix
@@ -71,6 +72,11 @@ RECALL_PERCENTS = (1.0, 5.0, 10.0)
 # Which cutoff feeds the un-suffixed primary metric. 5 % matches M-EF5 and
 # is the spec's recommended default (plan §4.3 stratification note).
 RECALL_PRIMARY_PERCENT = 5.0
+
+# Curve-cache filenames, one per retrieval CSV (write_enrichment_summary
+# would collide otherwise — the helper writes to a single npz per call).
+NPZ_STANDARD = "enrichment_curve_standard.npz"
+NPZ_HELDOUT  = "enrichment_curve_heldout.npz"
 
 
 # Extended schema: retrieval_common.RETRIEVAL_COLS plus the scaffold sets of
@@ -107,7 +113,7 @@ def _load_scaffold_map(dataset_id: str) -> dict[str, list[int]]:
 
 class Exp6ScaffoldHopping:
     id = "EXP-6"
-    version = "v0.4-heldout"
+    version = "v0.5-plots"
     datasets = RINLAN_DATASET_IDS
 
     metric_direction = {
@@ -229,8 +235,10 @@ class Exp6ScaffoldHopping:
             seed_scafef5.append(scafef5)
             seed_scafratio.append(scafratio)
 
+        std_csv = out / "retrieval_standard.csv"
         pd.DataFrame(retrieval_rows, columns=list(RETRIEVAL_COLS_EXP6)).to_csv(
-            out / "retrieval_standard.csv", index=False)
+            std_csv, index=False)
+        rc.write_enrichment_summary(out, std_csv, npz_name=NPZ_STANDARD)
 
         metrics: dict = {}
         metrics.update(rc.metric_entry("M-EF5",       seed_ef5))
@@ -296,8 +304,10 @@ class Exp6ScaffoldHopping:
                                                  n_targets, percent=percent)
                         )
 
+            heldout_csv = out / "retrieval_heldout.csv"
             pd.DataFrame(heldout_rows, columns=list(RETRIEVAL_COLS_EXP6)).to_csv(
-                out / "retrieval_heldout.csv", index=False)
+                heldout_csv, index=False)
+            rc.write_enrichment_summary(out, heldout_csv, npz_name=NPZ_HELDOUT)
 
             for percent in RECALL_PERCENTS:
                 key = f"M-RECALL-HELDOUT-SCAFFOLD_at{int(percent)}pct"
@@ -311,6 +321,145 @@ class Exp6ScaffoldHopping:
 
         (out / "metrics.json").write_text(rc.metrics_to_json(metrics))
         return metrics
+
+    # ------------------------------------------------------------------
+    # Plotting
+    # ------------------------------------------------------------------
+
+    def _eligible_heldout_datasets(self, method_ids: list[str]) -> list[str]:
+        """Datasets where at least one method emitted retrieval_heldout.csv.
+
+        Eligibility is decided per-target at run-time (>= 5 active scaffolds);
+        we detect it post-hoc from the presence of the CSV rather than re-
+        reading scaffolds.json so plots stay in sync with what actually ran.
+        """
+        return [
+            ds for ds in self.datasets
+            if any(
+                (result_dir(self.id, m, ds) / "retrieval_heldout.csv").exists()
+                for m in method_ids
+            )
+        ]
+
+    def _plot_ef5_vs_scafef5(self, plots_dir: Path, method_ids: list[str]) -> None:
+        """One point per (method, dataset): x = M-EF5, y = M-SCAFEF5.
+
+        The y = x diagonal separates "scaffold-tracking matches actives-
+        tracking" (on the line) from "more scaffold-diverse than analog-
+        biased" (above the line). A horizontal line at 1.0 marks the random
+        baseline for SCAFEF5 alone.
+        """
+        import matplotlib.pyplot as plt
+
+        # Stable color per method across plots — uses matplotlib's tab cycle
+        # so we don't fix a palette that fights themes downstream.
+        cmap = plt.get_cmap("tab20")
+        method_color = {m: cmap(i % 20) for i, m in enumerate(method_ids)}
+
+        fig, ax = plt.subplots(figsize=(7, 7))
+        any_point = False
+        xs_all: list[float] = []
+        ys_all: list[float] = []
+        for m_id in method_ids:
+            xs: list[float] = []
+            ys: list[float] = []
+            for ds_id in self.datasets:
+                p = result_dir(self.id, m_id, ds_id) / "metrics.json"
+                if not p.exists():
+                    continue
+                data = json.loads(p.read_text())
+                ef5 = data.get("M-EF5")
+                scafef5 = data.get("M-SCAFEF5")
+                if ef5 is None or scafef5 is None:
+                    continue
+                xs.append(ef5)
+                ys.append(scafef5)
+            if not xs:
+                continue
+            any_point = True
+            xs_all.extend(xs)
+            ys_all.extend(ys)
+            ax.scatter(xs, ys, color=method_color[m_id], label=m_id, s=40,
+                       alpha=0.75, edgecolor="black", linewidth=0.4)
+
+        if not any_point:
+            plt.close(fig)
+            return
+
+        lo = min(0.0, min(xs_all), min(ys_all))
+        hi = max(max(xs_all), max(ys_all)) * 1.05
+        ax.plot([lo, hi], [lo, hi], color="grey", linestyle="--", linewidth=0.8,
+                label="y = x (analog = scaffold)")
+        ax.axhline(1.0, color="black", linestyle=":", linewidth=0.6,
+                   label="SCAFEF random baseline")
+        ax.set_xlim(lo, hi)
+        ax.set_ylim(lo, hi)
+        ax.set_xlabel("M-EF5 (active enrichment, top 5 %)")
+        ax.set_ylabel("M-SCAFEF5 (distinct-scaffold enrichment, top 5 %)")
+        ax.set_title(f"{self.id}: EF5 vs SCAFEF5 — scaffold tracking vs analog tracking")
+        ax.legend(fontsize=7, loc="best")
+        fig.tight_layout()
+        fig.savefig(plots_dir / "ef5_vs_scafef5.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+    def make_plots(self, exp_results_dir: Path, method_ids: list[str]) -> None:
+        plots_dir = exp_results_dir / "plots"
+        plots_dir.mkdir(parents=True, exist_ok=True)
+
+        input_hashes: dict[str, str] = {}
+        for m_id in method_ids:
+            for ds_id in self.datasets:
+                for fname in ("retrieval_standard.csv", "retrieval_heldout.csv",
+                              "metrics.json"):
+                    p = result_dir(self.id, m_id, ds_id) / fname
+                    if p.exists():
+                        input_hashes[f"{m_id}/{ds_id}/{fname}"] = hash_file(p)
+
+        if not input_hashes:
+            return
+
+        sentinel = plots_dir / "enrichment_curves_standard.png"
+        if not is_stale(sentinel, self.version, input_hashes):
+            print(f"  [{self.id}] plots fresh")
+            return
+
+        print(f"  [{self.id}] generating plots...")
+
+        # 1) Sub-A enrichment curves (log-FPR vs TPR) — one panel per target.
+        rc.plot_enrichment_curves(
+            self.id, plots_dir, method_ids, self.datasets,
+            csv_name="retrieval_standard.csv",
+            npz_name=NPZ_STANDARD,
+            output_name="enrichment_curves_standard.png",
+            title_suffix=" — sub-A standard retrieval",
+        )
+
+        # 2) Methods × datasets heatmaps, one PNG per metric. The headline
+        #    is M-SCAFRATIO (scaffold-diversity heatmap from plan §7.2);
+        #    the rest are diagnostic.
+        rc.plot_metric_heatmap(
+            self.id, plots_dir, method_ids, self.datasets,
+            metrics=["M-EF5", "M-SCAFEF5", "M-SCAFRATIO",
+                     "M-RECALL-HELDOUT-SCAFFOLD"],
+        )
+
+        # 3) EF5 vs SCAFEF5 scatter — y = x is the "analog-tracking equals
+        #    scaffold-tracking" line; points above it favour hops over analogs.
+        self._plot_ef5_vs_scafef5(plots_dir, method_ids)
+
+        # 4) Sub-B held-out enrichment curves — only for eligible targets.
+        eligible = self._eligible_heldout_datasets(method_ids)
+        if eligible:
+            rc.plot_enrichment_curves(
+                self.id, plots_dir, method_ids, eligible,
+                csv_name="retrieval_heldout.csv",
+                npz_name=NPZ_HELDOUT,
+                output_name="enrichment_curves_heldout.png",
+                title_suffix=" — sub-B leave-one-scaffold-out",
+            )
+
+        write_manifest(sentinel, version=self.version, inputs=input_hashes,
+                       compute_time=0.0, dataset_size=0)
 
     def collect_results(self, method_ids: list[str]) -> pd.DataFrame:
         rows = []

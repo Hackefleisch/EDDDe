@@ -234,7 +234,7 @@ Bridges Strain A (features only) and Strain C (geometry-dominant). All variants 
 | D6 | Activity cliff pairs (30 ChEMBL targets) | EXP-4 | **Primary**: MoleculeACE pre-curated data — [github.com/molML/MoleculeACE/tree/main/MoleculeACE/Data/benchmark_data](https://github.com/molML/MoleculeACE/tree/main/MoleculeACE/Data/benchmark_data) / [van Tilborg et al. 2022](https://doi.org/10.1021/acs.jcim.2c01073). **Fallback** (if cliff definition needs to be MMP-only): current ChEMBL release + `mmpdb`; method: [Hu et al. 2012](https://doi.org/10.1021/ci3001138) |
 | D7 | SwissBioisostere replacements | EXP-5a | [swissbioisostere.ch](http://www.swissbioisostere.ch) / [Isert et al. 2022](https://doi.org/10.1093/nar/gkab1047) |
 | D8 | Curated classical bioisostere pairs | EXP-5b | Literature-based list, ~50–100 pairs; seed list from [Meanwell 2011](https://doi.org/10.1021/jm1013693) |
-| D9 | Riniker-Landrum 88-target benchmark | EXP-6 | [github.com/rdkit/benchmarking_platform](https://github.com/rdkit/benchmarking_platform) / [Riniker & Landrum 2013](https://doi.org/10.1186/1758-2946-5-26) |
+| D9 | Riniker-Landrum benchmark (37 ChEMBL_II targets used; "88" is the original MUV+DUD+ChEMBL union — see §5.8 note) | EXP-6 | [github.com/rdkit/benchmarking_platform](https://github.com/rdkit/benchmarking_platform) / [Riniker & Landrum 2013](https://doi.org/10.1186/1758-2946-5-26) |
 
 **Known dataset issues to document in results:**
 - D5 (DUD-E) is **deferred** — see EXP-3c §5.5 for rationale. The known analog bias and property shortcuts ([Chen et al. 2019](https://doi.org/10.1371/journal.pone.0220113)) make D3+D4 a more rigorous test of the same hypothesis at ~25 % of the compute cost. If D5 is later run, report both the full 102-target set and the bias-reduced ~47-target subset from [Lagarde et al. 2015](https://doi.org/10.1021/acs.jcim.5b00090), and weight results below D3 and D4 in final conclusions.
@@ -371,6 +371,7 @@ All experiments produce MUT results and corresponding results for every applicab
 - **Type**: external
 - **Question**: Does MUT retrieve actives with diverse scaffolds, not just analogs of the query?
 - **Data**: D9. 88 targets filtered for scaffold-hopping evaluation.
+  > **Note (implementation, 2026-06):** the EXP-6 implementation uses the **37 ChEMBL_II** targets, not 88. The Riniker-Landrum repo's `compounds/ChEMBL_II/` ships 37 targets (the ChEMBL-only VS subset with upstream scaffold clusters); the "88" figure is the original 2013 benchmark's MUV+DUD+ChEMBL union, which does not carry the scaffold annotations this experiment needs. The 37-target count is canonical for the code; the success criterion below should be read as "across the 37 targets". See `eddde/data/sources/rinlan.py` docstring for the full reconciliation.
 - **Protocol**:
   - For each target, select query; rank all compounds by distance.
   - Measure both overall enrichment and scaffold-level enrichment at 1%, 5%, 10% cutoffs.

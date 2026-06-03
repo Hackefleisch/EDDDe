@@ -12,6 +12,7 @@ from .sources.subst_cyclohexanes import SubstCyclohexanes
 from .sources.hammett_series import HammettSeries
 from .sources.welqrate import ALL_WELQRATE
 from .sources.muv import ALL_MUV
+from .sources.rinlan import ALL_RINLAN
 
 
 DATASETS: dict[str, Dataset] = {}
@@ -34,4 +35,6 @@ _register(HammettSeries())
 for _ds in ALL_WELQRATE:
     _register(_ds)
 for _ds in ALL_MUV:
+    _register(_ds)
+for _ds in ALL_RINLAN:
     _register(_ds)

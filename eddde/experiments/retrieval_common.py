@@ -104,6 +104,87 @@ def dcg_at_k(active_ranks, k: int = 100) -> float:
     return sum(1.0 / math.log2(r + 1) for r in active_ranks if r <= k)
 
 
+def recall_at_percent(ranks, n_total: int, n_targets: int, percent: float = 5.0) -> float:
+    """Fraction of `n_targets` whose rank falls within the top-`percent`%.
+
+    Used by EXP-6 sub-experiment B: ranks of held-out actives in a pool
+    of `n_total` candidates (decoys + held-out actives). Same cutoff
+    rule as ef_at_percent — ceil(n_total * p/100), 1-indexed ranks.
+    """
+    if n_targets == 0:
+        return float("nan")
+    cutoff = math.ceil(n_total * percent / 100.0)
+    tp = sum(1 for r in ranks if r <= cutoff)
+    return tp / n_targets
+
+
+def _log_comb(n: int, k: int) -> float:
+    """Log of C(n, k) via lgamma — stable for the large pools EXP-6 sees."""
+    if k < 0 or k > n:
+        return float("-inf")
+    return math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
+
+
+def scafef_at_percent(
+    retrieved_scaffold_sets: list[list[int]],
+    scaffold_active_counts: dict[int, int],
+    n_total: int,
+    percent: float = 5.0,
+) -> float:
+    """Scaffold-aware enrichment factor at top-`percent`% of the ranking.
+
+    Numerator: distinct scaffolds in the union of scaffold sets of the
+        actives that ranked in the top-k% (where k = ceil(n_total*p/100)).
+    Denominator: expected count under uniformly random ranking.
+
+    Set semantics: each active carries the full list of scaffold buckets it
+    belongs to (from the dataset's scaffolds.json sidecar — Riniker-Landrum's
+    Schuffenhauer hierarchy can place an active in many buckets). An active
+    "hits" every scaffold in its set.
+
+    The denominator is computed exactly via the hypergeometric tail, no
+    Monte-Carlo or equal-cluster-size approximation:
+        P(scaffold s appears in top-k) = 1 - C(n_total - n_s, k) / C(n_total, k)
+    where n_s = number of pool actives whose scaffold set contains s. The
+    expectation is the sum over s of that probability. This is exact even
+    when actives belong to multiple buckets, so the analytical denominator
+    in the original plan (geometric approximation assuming equal cluster
+    sizes) is not needed.
+
+    Args:
+      retrieved_scaffold_sets: scaffold lists of the actives in top-k%.
+      scaffold_active_counts:  {scaffold_id: n_actives_in_pool_with_it}
+                               over the same pool (i.e. excluding the query).
+      n_total:                 pool size, excluding the query.
+      percent:                 top-k % cutoff.
+
+    Returns NaN if the pool or the scaffold count map is empty.
+    """
+    if n_total <= 0 or not scaffold_active_counts:
+        return float("nan")
+
+    k = max(1, math.ceil(n_total * percent / 100.0))
+    k = min(k, n_total)
+
+    observed = len({s for sids in retrieved_scaffold_sets for s in sids})
+
+    log_total = _log_comb(n_total, k)
+    expected = 0.0
+    for s, n_s in scaffold_active_counts.items():
+        if n_s <= 0:
+            continue
+        if n_total - n_s < k:
+            # All k-subsets must contain at least one s-bearing active.
+            expected += 1.0
+        else:
+            p_miss = math.exp(_log_comb(n_total - n_s, k) - log_total)
+            expected += 1.0 - p_miss
+
+    if expected <= 0:
+        return float("nan")
+    return observed / expected
+
+
 # ---------------------------------------------------------------------------
 # Aggregation helpers — silent over NaN so test-mode "no actives in this
 # split" cases don't drown the log in numpy warnings.
@@ -203,13 +284,21 @@ def _build_curve_arrays(df: pd.DataFrame) -> tuple[np.ndarray, int]:
     return tpr_grid, n_curves
 
 
-def write_enrichment_summary(out_dir: Path, retrieval_csv: Path) -> None:
+def write_enrichment_summary(
+    out_dir: Path,
+    retrieval_csv: Path,
+    *,
+    npz_name: str = ENRICHMENT_CURVE_NPZ,
+) -> None:
     """Persist the 200-point TPR curve next to `retrieval_csv` as npz.
 
     Call from each experiment's `run()` immediately after writing the
     retrieval CSV. Plotting then loads tiny npz files instead of
     re-grouping millions of CSV rows. An empty CSV writes no npz —
     `_load_or_build_curve` treats absence as "skip this method".
+
+    Experiments that emit multiple retrieval CSVs (EXP-6: standard +
+    heldout) pass distinct `npz_name`s so the two curves don't collide.
     """
     df = read_csv_or_empty(retrieval_csv)
     if df.empty:
@@ -218,28 +307,33 @@ def write_enrichment_summary(out_dir: Path, retrieval_csv: Path) -> None:
     if n_curves == 0:
         return
     np.savez(
-        out_dir / ENRICHMENT_CURVE_NPZ,
+        out_dir / npz_name,
         log_fprs=LOG_FPR_GRID,
         tpr=tpr,
         n_curves=np.int64(n_curves),
     )
 
 
-def _load_or_build_curve(method_dir: Path) -> np.ndarray | None:
+def _load_or_build_curve(
+    method_dir: Path,
+    *,
+    csv_name: str = "retrieval_rankings.csv",
+    npz_name: str = ENRICHMENT_CURVE_NPZ,
+) -> np.ndarray | None:
     """Return the cached TPR array, building it from the CSV if missing.
 
     The npz is considered fresh when it exists and is at least as new as
     the source CSV. Stale npz files are rebuilt in place so older runs
     (from before this cache existed) self-heal on first plot.
     """
-    csv_path = method_dir / "retrieval_rankings.csv"
-    npz_path = method_dir / ENRICHMENT_CURVE_NPZ
+    csv_path = method_dir / csv_name
+    npz_path = method_dir / npz_name
     if not csv_path.exists():
         return None
     if npz_path.exists() and npz_path.stat().st_mtime >= csv_path.stat().st_mtime:
         with np.load(npz_path) as data:
             return data["tpr"].copy()
-    write_enrichment_summary(method_dir, csv_path)
+    write_enrichment_summary(method_dir, csv_path, npz_name=npz_name)
     if npz_path.exists():
         with np.load(npz_path) as data:
             return data["tpr"].copy()
@@ -251,12 +345,20 @@ def plot_enrichment_curves(
     plots_dir: Path,
     method_ids: list[str],
     datasets: list[str],
+    *,
+    csv_name: str = "retrieval_rankings.csv",
+    npz_name: str = ENRICHMENT_CURVE_NPZ,
+    output_name: str = "enrichment_curves.png",
+    title_suffix: str = "",
 ) -> None:
     """Log-scale ROC per dataset, one line per method (avg over seeds & queries).
 
-    Reads cached `enrichment_curve.npz` per (method, dataset) — built by
+    Reads cached enrichment-curve npz per (method, dataset) — built by
     `write_enrichment_summary` during `run()`. Falls back to recomputing
     + caching on the fly for older runs that predate the cache.
+
+    `csv_name` / `npz_name` / `output_name` let experiments with multiple
+    retrieval variants (EXP-6 standard vs heldout) emit separate plots.
     """
     fig, axes_flat = _per_dataset_grid(len(datasets))
 
@@ -271,7 +373,10 @@ def plot_enrichment_curves(
                 linestyle="--", label="random")
 
         for m_id in method_ids:
-            tpr = _load_or_build_curve(result_dir(exp_id, m_id, ds_id))
+            tpr = _load_or_build_curve(
+                result_dir(exp_id, m_id, ds_id),
+                csv_name=csv_name, npz_name=npz_name,
+            )
             if tpr is None:
                 continue
             ax.plot(LOG_FPR_GRID, tpr, linewidth=1.2, label=m_id)
@@ -282,9 +387,9 @@ def plot_enrichment_curves(
     for ax_idx in range(len(datasets), len(axes_flat)):
         axes_flat[ax_idx].set_visible(False)
 
-    fig.suptitle(f"{exp_id}: Log-scale enrichment curves (avg over queries & seeds)")
+    fig.suptitle(f"{exp_id}: Log-scale enrichment curves (avg over queries & seeds){title_suffix}")
     fig.tight_layout()
-    fig.savefig(plots_dir / "enrichment_curves.png", dpi=150, bbox_inches="tight")
+    fig.savefig(plots_dir / output_name, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -310,18 +415,30 @@ def plot_metric_heatmap(
         if np.all(np.isnan(data_grid)):
             continue
 
-        fig, ax = plt.subplots(
-            figsize=(max(6, len(datasets) * 0.9),
-                     max(3, len(method_ids) * 0.6)),
-        )
-        im = ax.imshow(data_grid, aspect="auto", cmap="YlGn",
+        # Drop all-NaN columns so smoke runs (where most datasets are
+        # filtered out) don't render acres of empty cells. Full-mode runs
+        # have data in every column and this is a no-op.
+        keep = ~np.all(np.isnan(data_grid), axis=0)
+        data_grid = data_grid[:, keep]
+        kept_datasets = [d for d, k in zip(datasets, keep) if k]
+
+        # Cell-proportional figure size + aspect="equal" so cells stay square
+        # regardless of grid shape. The previous (max(6, n_ds*0.9), max(3,
+        # n_methods*0.6)) + aspect="auto" stretched cells flat when one axis
+        # dwarfed the other — e.g. 37 RinLan datasets × 2 methods produced
+        # 33×3 figures where each cell was 0.9 wide and ~1.5 tall.
+        cell = 0.55  # inches per cell; comfortable label readout
+        w = max(6.0, len(kept_datasets) * cell + 4.0)
+        h = max(3.0, len(method_ids) * cell + 2.5)
+        fig, ax = plt.subplots(figsize=(w, h))
+        im = ax.imshow(data_grid, aspect="equal", cmap="YlGn",
                        vmin=np.nanmin(data_grid), vmax=np.nanmax(data_grid))
-        ax.set_xticks(range(len(datasets)))
-        ax.set_xticklabels(datasets, rotation=45, ha="right", fontsize=8)
+        ax.set_xticks(range(len(kept_datasets)))
+        ax.set_xticklabels(kept_datasets, rotation=45, ha="right", fontsize=8)
         ax.set_yticks(range(len(method_ids)))
         ax.set_yticklabels(method_ids, fontsize=8)
         for i in range(len(method_ids)):
-            for j in range(len(datasets)):
+            for j in range(len(kept_datasets)):
                 v = data_grid[i, j]
                 if not np.isnan(v):
                     ax.text(j, i, f"{v:.3f}", ha="center", va="center", fontsize=7)

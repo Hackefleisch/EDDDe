@@ -481,6 +481,8 @@ This stratification also dovetails with EXP-2 (Hammett series — pure electroni
 - Contains compound sets from three data sources: MUV, DUD, ChEMBL, with 88 targets after filtering.
 - Includes scaffold enrichment metrics specifically designed for scaffold hopping assessment.
 
+> **Note (implementation, 2026-06):** EXP-6 uses the **37 ChEMBL_II** targets, not the full 88. The repo's `compounds/ChEMBL_II/` ships 37 targets — the ChEMBL-only virtual-screening subset that carries upstream scaffold clusters. The "88" figure is the original 2013 MUV+DUD+ChEMBL union, whose MUV/DUD members lack the scaffold annotations this experiment needs. Read "88 targets" below as "37 ChEMBL_II targets". See `eddde/data/sources/rinlan.py` and `PROJECT_PLAN.md` §5.8 for the full reconciliation.
+
 **Procedure:**
 
 1. For each of the 88 targets and each method:
@@ -573,7 +575,7 @@ Rationale: a single minimum-energy conformer is the natural input for QM-derived
 | 3c | DUD-E retrieval | **Deferred** (see §4.3c) | 102 targets | AUC-ROC, BEDROC(20), EF₁% | Literature-comparable VS benchmark — implementation deferred, paper-time discussion required |
 | 4 | Activity cliff analysis | External | ~10,000 MMP pairs from ChEMBL | SALI, cliff detection AUC, distance–ΔpKi ρ | Sensitivity to potency-relevant changes |
 | 5 | Bioisostere recognition | External | SwissBioisostere + classical pairs | Bioisostere detection AUC, cross/within ratio | Functional equivalence beyond topology |
-| 6 | Scaffold hopping | External | 88 targets (Riniker & Landrum) | Scaffold-EF₅%, Scaffold-EF/EF ratio | Chemotype diversity in retrieval |
+| 6 | Scaffold hopping | External | 37 ChEMBL_II targets (Riniker & Landrum; see §EXP-6 note) | Scaffold-EF₅%, Scaffold-EF/EF ratio | Chemotype diversity in retrieval |
 
 ---
 

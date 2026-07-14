@@ -3,6 +3,7 @@ cache/
 results/
 figures/
 eddde/local_settings.py
+scratch/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

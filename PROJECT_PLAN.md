@@ -336,15 +336,14 @@ All experiments produce MUT results and corresponding results for every applicab
 - **Metrics**: M-SALI-DIST (distribution comparison), M-CLIFF-AUC, M-DIST-POTENCY-RHO
 - **Expected behavior**: Topological FPs assign very high similarity (low distance) to both cliffs and non-cliffs because transformations are small by construction — poor cliff discrimination. MUT should assign higher distance to cliff pairs if it captures electronic perturbation from small structural changes.
 - **Success criterion**: MUT's Spearman ρ (distance vs. |ΔpKi|) > 0.3 AND significantly higher than all B1–B6 (p < 0.01).
-- **Sub-analysis**: Stratify M-DIST-POTENCY-RHO by transformation type: R-group / ring / linker changes.
-- **Optional upgrade — decide at implementation time**: cliffs have multiple causes (electronic, steric, receptor-specific induced fit) and a ligand-only method cannot resolve receptor-specific cases. To make claims sharper, stratify pairs into easy / medium / hard subsets by transformation class:
+- **Sub-analysis**: Stratify M-DIST-POTENCY-RHO by transformation type: R-group / ring / linker changes. **Deferred (follow-up)**: MoleculeACE pairs are similarity-defined, not MMP-defined; a clean R-group / ring / linker label needs an MMP transform extraction pass (`mmpdb` or equivalent) that is not required for the headline metrics. Ship the unstratified EXP-4 first; add the stratification when the MMP layer lands.
+- **Optional upgrade — deferred at implementation time**: cliffs have multiple causes (electronic, steric, receptor-specific induced fit) and a ligand-only method cannot resolve receptor-specific cases. The unstratified MoleculeACE route already produces the three plan metrics plus the cross-method ρ significance test; the transformation classifier (easy / medium / hard + receptor-bypass diagnostics) is a few hundred LOC of cheminformatics with judgment-call rules and is left as a follow-up rather than blocking EXP-4. Proposed strata for that follow-up:
   - **Easy / electronic**: charge-state change, H-bond donor/acceptor swap, strong π-perturbation (e.g. -OMe → -CN). MUT *should* clearly beat topological FPs.
   - **Easy / steric**: Δheavy-atom-count ≥ 3, branching change (Me → tBu), ring fusion. MUT *should* beat topological FPs moderately.
   - **Medium**: halogen swap (F↔Cl), single H↔Me, polar-to-polar same-class swap. Calibration zone.
   - **Hard / receptor-required**: bioisosteric swap, single-atom change in flexible region, subtle conformational lock. Parity expected — no ligand-only method should win.
   - Add **diagnostic tests** that bypass the receptor entirely (verify the embedding is sensitive to known-important features): among non-cliff pairs, MUT distance for charge-changing / H-bond-changing / large-Δvolume pairs should exceed MUT distance for inert pairs, and the gap should be larger than for ECFP. If MUT fails these, EXP-4 is dead before the cliff AUC matters.
   - **Reframes the headline claim** from "MUT beats baselines at cliff detection" to "MUT beats baselines on ligand-explainable cliffs and matches them on receptor-specific cliffs" — weaker but truer, and dovetails with EXP-2 (Hammett) and EXP-5 (bioisosteres).
-  - **Cost**: writing the transformation classifier is non-trivial (a few hundred LOC of cheminformatics). Decide at EXP-4 implementation time whether to pay it.
 
 ### 5.7 EXP-5: Bioisostere Recognition
 

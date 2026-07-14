@@ -19,6 +19,7 @@ dependencies = [
     "tqdm",
     "elektronn",
     "espsim",
+    "rapidfuzz",
 ]
 
 [project.optional-dependencies]

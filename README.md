@@ -112,5 +112,5 @@ Authoritative, always-fresh per-method numbers live in [results/SUMMARY.md](resu
 - **Framework** — done (runner, caching, manifest chain, SUMMARY writer, optional-binary soft-skip).
 - **Baselines** — B1–B11 and B18 implemented. B12 (Mol2vec), B13 (Uni-Mol), B14 (Chemprop), B15–B17 (Coulomb matrix, SOAP, ACSF) pending.
 - **MUTs** — Five-strain taxonomy spec'd in [PROJECT_PLAN.md §3.2](PROJECT_PLAN.md). Strain A: `MUT-mean` implemented (refactor to 39-d scalarised pending); other Strain A variants and Strains B/C/D/E all planned.
-- **Datasets** — Internal series S1–S8 done. D3 WelQrate (9 PubChem AIDs) and D4 MUV (17 AIDs) done. D5 DUD-E deferred (see PROJECT_PLAN.md §5.5). D6 cliffs, D7–D8 bioisosteres, D9 Riniker-Landrum pending.
-- **Experiments** — EXP-1, EXP-2 done. EXP-3a, EXP-3b implemented; first end-to-end runs in progress. EXP-3c deferred (see PROJECT_PLAN.md §5.5). EXP-4 cliffs, EXP-5 bioisosteres, EXP-6 scaffold hopping pending.
+- **Datasets** — Internal series S1–S8 done. D3 WelQrate (9 PubChem AIDs) and D4 MUV (17 AIDs) done. D5 DUD-E deferred (see PROJECT_PLAN.md §5.5). D6 MoleculeACE cliffs (30 ChEMBL targets) done. D7–D8 bioisosteres, D9 Riniker-Landrum pending.
+- **Experiments** — EXP-1, EXP-2 done. EXP-3a, EXP-3b implemented; first end-to-end runs in progress. EXP-3c deferred (see PROJECT_PLAN.md §5.5). EXP-4 cliffs implemented (MoleculeACE route; transformation-type / hardness stratification deferred). EXP-5 bioisosteres, EXP-6 scaffold hopping pending.

@@ -52,7 +52,7 @@ from sklearn.metrics import roc_auc_score
 from ..cache import hash_file, is_stale, write_manifest
 from ..data.base import Stage
 from ..data.sources.molecule_ace import MOLECULE_ACE_DATASET_IDS
-from ..methods.distance import pairwise_matrix
+from ..methods.distance import pair_distances
 from .base import result_dir
 
 
@@ -210,10 +210,13 @@ class Exp4ActivityCliffs:
         d_pY = np.abs(pY[i_idx] - pY[j_idx])
         cliff = (d_pY >= CLIFF_DPY_THRESHOLD).astype(np.int8)
 
-        D = pairwise_matrix(method, embeddings, mol_ids, mol_ids)
-        # Symmetrise for methods with asymmetric distance (B8 etc.); no-op otherwise.
-        D = 0.5 * (D + D.T)
-        dist = D[i_idx, j_idx].astype(np.float64)
+        # Sparse similar-pair list — avoid the full N×N that pairwise_matrix
+        # would compute. symmetrise=True matches the EXP-2 convention for
+        # asymmetric methods (B8, B11); no-op for naturally-symmetric ones.
+        pairs = [(mol_ids[i], mol_ids[j]) for i, j in zip(i_idx, j_idx)]
+        dist = pair_distances(
+            method, embeddings, pairs, symmetrise=True,
+        ).astype(np.float64)
 
         pairs_df = pd.DataFrame({
             "a": [mol_ids[i] for i in i_idx],
